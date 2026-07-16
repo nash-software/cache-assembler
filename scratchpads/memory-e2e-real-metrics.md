@@ -119,3 +119,38 @@ consecutive_failures:
   stub, no unique content) — removed for consistency with iteration 1's
   cleanup.
 - Dispatched architecture-reviewer + tester in parallel (Stage 3.5 / 4).
+- architecture-reviewer: VIOLATIONS blocking=0 advisory=3 (sha256Hex
+  triplicated across 3 new files — trivial, easy consolidate; stub-upstream's
+  own sendJson/readRequestBody duplicates src/server.ts — judged correct,
+  deliberate isolation from the module under test; tsconfig duplication note
+  now that extends is gone). Non-blocking per protocol (blocking=0) — logged
+  for eventual PR body "Architecture notes", proceeding.
+- tester: found a pure-logic coverage gap (layers.ts, fixtures/session-turns.ts
+  only indirectly exercised via run-synthetic.ts's aggregate assertions) and
+  wrote scratchpads/tester-coverage-gaps-plan.md (approved) plus
+  test/e2e/layers.test.ts and test/e2e/fixtures/session-turns.test.ts.
+  Session crashed (tmux/OOM, unrelated to this work) before these were
+  committed. Resumed session verified: type-check clean, both new test files
+  pass in isolation (21/21), full suite passes (14 files/104 tests), and the
+  actual criterion-2 rubric verify command passes (all L0-L5 present with
+  numeric cacheHitRate/estSavedUsd, concurrency.barrierOnWrites <
+  barrierOffWrites). Committed (b1886a1) along with the architecture-review
+  result JSON.
+
+## Iteration 2 — CLOSED: criterion 2 fully satisfied (PASS)
+
+- All Must-Pass verify commands re-checked fresh at close of iteration 2:
+  - C1 type-check: PASS
+  - C2 e2e:synthetic layer/concurrency proof: PASS (verified above)
+  - C3 e2e:report: still FAIL (script not implemented yet)
+  - C4 e2e:real refuses without --confirm: still FAIL (script missing)
+  - C5 e2e:real --dry-run: still FAIL (script missing)
+  - C6 unit tests (stub-upstream + build-report): PARTIAL — stub-upstream
+    test exists and passes; test/e2e/report/build-report.test.ts still
+    missing (depends on criterion 3's report builder, not yet built).
+- Next failing criterion for iteration 3: **criterion 3** (report builder —
+  self-contained HTML report with cache-hit-rate chart, $-saved chart, raw
+  numbers table, concurrency-proof section, no external script/link
+  resources). This is the next foundational piece — criterion 6's
+  build-report.test.ts depends on it, and criteria 4/5 (real-CLI harness)
+  are independent of it, so no ordering constraint forces them first.
