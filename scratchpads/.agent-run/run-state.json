@@ -4,13 +4,13 @@
   "plan_file": "scratchpads/e2e-real-metrics-goal.md",
   "started_at": "2026-07-16T18:39:21Z",
   "status": "in-progress",
-  "last_update": "2026-07-16T20:31:42Z",
+  "last_update": "2026-07-16T20:55:07Z",
   "agents": {
     "vps_dispatch": {
       "status": "working",
       "run_id": "orch-20260716-c1da39",
       "session": "vc-cache-assembler",
-      "reason": "redispatched after nash-vps recovered; workspace-trust prompt dismissed; lane confirmed working via run_status"
+      "note": "first seed attempt collided with auto-dismissal of the workspace-trust prompt and never reached the session; re-sent the full seed via tmux paste-buffer, confirmed genuinely working via pane inspection + run_status"
     }
   }
 }
