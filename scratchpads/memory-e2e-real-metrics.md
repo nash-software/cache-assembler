@@ -1,7 +1,7 @@
 loop_started_at: 2026-07-16T20:57:00Z
-iteration: 1
+iteration: 2
 consecutive_failures:
-  1: 1
+  1: 0
   2: 0
   3: 0
   4: 0
@@ -58,3 +58,31 @@ consecutive_failures:
   `ECC_ALLOW_CONFIG_EDIT=1` and relaunch host, then resume; (2) operator
   applies the two fully-specified JSON edits directly; (3) another explicit
   override. No rework needed on resume either way.
+
+- Resolution: operator applied the exact plan content directly (commit
+  b746dd6, pushed to origin). Also surfaced separately: origin had two more
+  commits (821f477, 69642e4) recording a VPS lane (orch-20260716-c1da39)
+  that had been re-dispatched and reported "working" concurrently with this
+  local session. Operator confirmed that VPS lane is dead/stale; run-state
+  mirror reconciled (stale-superseded) and loop continues locally only.
+  npm run type-check reconfirmed zero errors after git pull.
+
+## Iteration 2 pre-work notes
+
+- Re-ran all 6 Must Pass verify commands fresh:
+  - C1 type-check: PASS (zero errors) - confirmed fixed by commit b746dd6.
+  - C2 e2e:synthetic: FAIL - npm script missing.
+  - C3 e2e:report: FAIL - npm script missing.
+  - C4 e2e:real (no args): FAIL - npm script missing (not the intended
+    safety-rail refusal yet).
+  - C5 e2e:real --dry-run: FAIL - npm script missing.
+  - C6 unit tests: FAIL - both harness test files missing.
+- First failing criterion selected for iteration 2: criterion 2 (synthetic
+  harness, L0-L5 + concurrency proof) - this is the largest, most
+  foundational remaining piece (stub-upstream, layers config, session
+  fixture, run-synthetic orchestrator) and criteria 3/6 partially depend on
+  artifacts it introduces (layers.ts, fixtures/session-turns.ts,
+  stub-upstream.ts). Scope is large per the spec's Architecture section -
+  dispatching architect for this one instead of hand-writing a 4-step
+  micro-plan, per protocol step 3's "if scope is large or unclear, dispatch
+  architect first" clause.
