@@ -86,3 +86,36 @@ consecutive_failures:
   dispatching architect for this one instead of hand-writing a 4-step
   micro-plan, per protocol step 3's "if scope is large or unclear, dispatch
   architect first" clause.
+
+## Iteration 2 — build + gates
+
+- Architect wrote a thorough 4-step micro-plan with verified source
+  evidence (config.ts defaults, server.ts wiring, telemetry.ts pricing
+  formula, breakpoints.ts placement rules, deferral.ts dry-run behavior,
+  presets.ts loader) — see scratchpads/e2e-real-metrics-micro-2.md.
+- Codex spec-review (2.6) not retried — same `gpt-5.4` environment error as
+  iteration 1, logged as a second bypass note for the eventual PR body.
+- Builder committed steps 1-3 (2391480, e335dc7, bd2c463) but its final
+  return was truncated mid-task after writing (uncommitted)
+  stub-upstream.test.ts. Orchestrator picked up directly: reviewed the test
+  file (well-formed, covers no-breakpoint/first-write/repeat-read/
+  longest-prefix/commit-false-snapshot cases), ran full regression
+  (type-check 0 errors, vitest 12 files/83 tests passing), ran the actual
+  criterion-2 verify command + the two extra acceptance checks from the
+  micro-plan (L0/L1 zero hit rate, L2>0, L5>=L2; run-synthetic excluded
+  from vitest collection) — all 5 passed. Committed step 4 (b0fff1b).
+- Stage 3.9 VERIFY_PLAN (deterministic gate): exit 1 (UNVERIFIED) — the
+  script's parser requires single-line `verify:` entries; ours are
+  multi-line `node -e` snippets (same shape as the rubric itself), so all 5
+  ACs were parsed but classified "unknown level / no verify: block" rather
+  than executed. This is the "ACs exist but some unverifiable" case, not
+  skeleton detection (zero ACs) — non-blocking per protocol, proceed with a
+  PR-body note. Substance already independently verified above (all 5 pass
+  for real). Likely to recur every iteration given the rubric's own verify
+  commands are multi-line — noted for the eventual PR body, not something
+  worth reformatting mid-loop.
+- Cleaned up a stray `scratchpads/e2e-real-metrics-micro-2-plan.md` (same
+  plan-gate-naming workaround pattern as iteration 1, thin reference-only
+  stub, no unique content) — removed for consistency with iteration 1's
+  cleanup.
+- Dispatched architecture-reviewer + tester in parallel (Stage 3.5 / 4).
