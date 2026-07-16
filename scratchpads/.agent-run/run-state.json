@@ -23,10 +23,16 @@
       "reason": "builder was blocked by pre-tool-config-protection.js (tsconfig*.json edit rail, no in-session bypass); operator applied the exact plan content directly (commit b746dd6) and confirmed type-check passes"
     },
     "pipeline-iter-2": {
-      "status": "in-progress",
+      "status": "done",
       "run_file": ".agent-run/runs/e2e-real-metrics-iter2.md",
       "criterion": 2,
-      "current_stage": "BUILD"
+      "reason": "criterion 2 (synthetic harness L0-L5 + concurrency proof) verified PASS iteration close-out"
+    },
+    "pipeline-iter-3": {
+      "status": "in-progress",
+      "run_file": ".agent-run/runs/e2e-real-metrics-iter3.md",
+      "criterion": 3,
+      "current_stage": "PLAN_REVIEW"
     }
   }
 }
