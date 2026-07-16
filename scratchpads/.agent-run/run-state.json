@@ -4,13 +4,23 @@
   "plan_file": "scratchpads/e2e-real-metrics-goal.md",
   "started_at": "2026-07-16T18:39:21Z",
   "status": "in-progress",
-  "last_update": "2026-07-16T20:55:07Z",
+  "last_update": "2026-07-17T00:45:00Z",
   "agents": {
     "vps_dispatch": {
-      "status": "working",
+      "status": "stale-superseded",
       "run_id": "orch-20260716-c1da39",
       "session": "vc-cache-assembler",
-      "note": "first seed attempt collided with auto-dismissal of the workspace-trust prompt and never reached the session; re-sent the full seed via tmux paste-buffer, confirmed genuinely working via pane inspection + run_status"
+      "reason": "operator confirmed this VPS lane is dead/stale; loop continues locally"
+    },
+    "run_mode": {
+      "status": "switched-to-local",
+      "reason": "VPS lane confirmed stale by operator; continuing QUALITY-GATED LOOP PROTOCOL locally"
+    },
+    "pipeline-iter-1": {
+      "status": "done",
+      "run_file": ".agent-run/runs/e2e-real-metrics-iter1.md",
+      "criterion": 1,
+      "reason": "builder was blocked by pre-tool-config-protection.js (tsconfig*.json edit rail, no in-session bypass); operator applied the exact plan content directly (commit b746dd6) and confirmed type-check passes"
     }
   }
 }
