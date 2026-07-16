@@ -1,0 +1,33 @@
+{
+  "name": "cache-assembler",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Rewrites Anthropic Messages API requests for maximal prompt-cache reuse",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "cache-assembler": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./cli": "./dist/cli.js"
+  },
+  "files": ["dist", "presets", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.17.10",
+    "fast-check": "^3.23.1",
+    "typescript": "^5.6.3",
+    "vitest": "^4.1.8"
+  }
+}

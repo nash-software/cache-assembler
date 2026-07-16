@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.memory/
+test/e2e/results/
+*.log
+.DS_Store
