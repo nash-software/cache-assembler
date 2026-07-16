@@ -1,0 +1,9 @@
+{
+  "rubric": "scratchpads/e2e-real-metrics-goal.md",
+  "goal": "implement the e2e test suite for real cache/cost metrics per docs/superpowers/specs/2026-07-16-e2e-real-metrics-design.md",
+  "spec_path": "docs/superpowers/specs/2026-07-16-e2e-real-metrics-design.md",
+  "existing_plan": null,
+  "run_mode": "vps",
+  "marked_ready_at": "2026-07-16T18:39:34Z",
+  "rubric_sha": "8cb797c69d353e933d02d76cce8383457a8b525d25a2052a36e3fbca3e70b4b8"
+}

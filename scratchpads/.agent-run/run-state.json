@@ -1,0 +1,9 @@
+{
+  "run_id": "e2e-real-metrics-20260716-183921",
+  "task": "Implement e2e test suite for real cache/cost metrics",
+  "plan_file": "scratchpads/e2e-real-metrics-goal.md",
+  "started_at": "2026-07-16T18:39:21Z",
+  "status": "in-progress",
+  "last_update": "2026-07-16T18:39:21Z",
+  "agents": {}
+}
