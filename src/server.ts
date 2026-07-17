@@ -29,7 +29,7 @@ const HOP_PATH_PREFIX = '/hop/'
 const HEALTH_PATH = '/health'
 const STATS_PATH = '/stats'
 const LOG_PREFIX = '[cache-assembler]'
-const EXCLUDED_FORWARD_HEADERS = new Set(['host', 'content-length', 'connection'])
+const EXCLUDED_FORWARD_HEADERS = new Set(['host', 'content-length', 'connection', 'accept-encoding'])
 const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
 
 function isProxiedPath(pathname: string): boolean {
@@ -109,6 +109,13 @@ interface UpstreamResponse {
   body: IncomingMessage
 }
 
+/**
+ * Never forwards the client's own accept-encoding — forces 'identity' so the
+ * upstream response body is always plain text. Without this, a real
+ * upstream (which will happily gzip/br-compress a streamed response when a
+ * client permits it) produces bytes that extractUsage cannot parse, and
+ * telemetry silently never records a single request.
+ */
 function buildForwardHeaders(original: IncomingHttpHeaders, payloadLength: number): OutgoingHttpHeaders {
   const headers: OutgoingHttpHeaders = {}
   for (const [key, value] of Object.entries(original)) {
@@ -117,6 +124,7 @@ function buildForwardHeaders(original: IncomingHttpHeaders, payloadLength: numbe
   }
   headers['content-type'] = headers['content-type'] ?? 'application/json'
   headers['content-length'] = payloadLength
+  headers['accept-encoding'] = 'identity'
   return headers
 }
 
