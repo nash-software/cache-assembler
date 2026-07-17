@@ -35,10 +35,14 @@
       "reason": "criterion 3 (report builder self-contained HTML) and criterion 6 (both pure-logic test files) verified PASS iteration close-out"
     },
     "pipeline-iter-4": {
-      "status": "in-progress",
+      "status": "done",
       "run_file": ".agent-run/runs/e2e-real-metrics-iter4.md",
       "criterion": 4,
-      "current_stage": "PLAN"
+      "reason": "criteria 4 (confirm safety rail) and 5 (--dry-run orchestration) verified PASS iteration close-out; all 6 Must Pass rubric criteria now satisfied"
+    },
+    "should-pass-readme": {
+      "status": "in-progress",
+      "reason": "test/e2e/README.md documenting invocation + real-CLI cost/credential requirements - sole remaining rubric item before DELIVER"
     }
   }
 }

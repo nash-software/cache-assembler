@@ -225,3 +225,86 @@ consecutive_failures:
   iteration 4 should aim to satisfy criterion 4 fully and may pick up
   criterion 5 as a natural byproduct if scope allows, but criterion 4 is the
   formal target.
+
+## Iteration 4 — resumed after third tmux/OOM crash
+
+- Prior session crashed after writing the iteration-4 micro-plan
+  (`scratchpads/e2e-real-metrics-micro-4.md`, commit f88bb64) but before any
+  BUILD steps ran — clean slate, no partial commits or uncommitted work to
+  reconcile on resume. Moved aside the recurring stray `C:/` hook-cache
+  directory before starting (same environmental issue noted since
+  iteration 3, harmless).
+- Builder executed the fully-specified 3-step plan exactly as written:
+  `test/e2e/real-cli/run-real-cli.ts` (pure exports: parseRealCliArgs,
+  selectLayers, estimateSpendUsd, createDryRunRunner, runLayerDry) and its
+  guarded `main()` (confirm gate -> validate -> budget estimate -> hard-cap
+  check -> dry-run orchestration or live-refusal stub), plus
+  `test/e2e/real-cli/run-real-cli.test.ts` and the one-line `package.json`
+  script addition. Committed in 3 steps (039a336, 3bdb7bb, 5e44aca). All 10
+  of the plan's acceptance criteria passed on first attempt — no rework
+  needed at the builder stage itself.
+- Builder hit the plan-gate hook (micro-plan filename `*-micro-4.md` doesn't
+  match the hook's `*-plan.md` pattern) and used the documented orchestrator
+  escape hatch (`scratchpads/.agent-run/gate-exempt-<session_id>.json`) to
+  proceed — consistent with prior iterations' equivalent workaround.
+  Orchestrator committed this marker file (543831a) rather than treat it as
+  disposable, following the established convention of committing
+  `.agent-run/` orchestration artifacts (run-state.json, architecture-review
+  results) in this repo's history — a Stop-hook dirty-tree check fired
+  mid-session and this was the cleanest resolution.
+- Dispatched architecture-reviewer + tester in parallel (Stage 3.5/4):
+  - architecture-reviewer: CLEAN, 0 blocking, 1 advisory (same
+    already-accepted `run-synthetic.ts` type/formula duplication pattern as
+    iteration 3, now duplicated in a second file — still out of scope since
+    the fix requires touching `run-synthetic.ts`). One functional note
+    surfaced for visibility, not blocking: `--model` is parsed but never
+    reaches `runLayerDry`'s `TurnRunner` context — invisible today since the
+    dry-run stub ignores `ctx.model`, but would silently no-op once a live
+    runner honors it. Left as-is (out of scope for this iteration's
+    dry-run-only mandate); worth revisiting when the live path lands.
+  - tester: added genuine pure-logic coverage (parseRealCliArgs defaults/
+    flag-mapping, parsePositiveInt boundary/invalid cases including a
+    documented `"3.7"` truncation note, selectLayers empty/duplicate/
+    whitespace/trailing-comma edge cases, estimateSpendUsd zero-boundary
+    cases, runLayerDry mixed success/failure isolation) — but also added a
+    subprocess-integration test block (`execFileSync` spawning the real
+    `tsx run-real-cli.ts` script) to cover hard-cap/`--force-instances`/
+    gate-ordering logic that lives only inline in `main()`. Orchestrator
+    caught that this violated micro-plan decision 11's explicit "never
+    executes the script, never spawns anything" constraint AND broke the
+    plan's AC4 structural safety grep (`grep -rE
+    "child_process|node:http|fetch\(" test/e2e/real-cli/`, directory-wide,
+    not source-file-scoped) — verified this by literally running the grep
+    before deciding, not by inspection alone. Removed that block (and its
+    now-unused `execFileSync`/`fileURLToPath` imports), kept all the other
+    genuine additions. Re-verified type-check, AC4 grep, and full suite
+    green before committing (98750fd, alongside the architecture-review
+    result JSON). The hard-cap/gate-ordering logic gap remains uncovered by
+    pure unit tests, but is already exercised by the rubric's own
+    integration-style verify commands for criteria 4/5 plus the plan's own
+    AC1/AC2/AC6 — judged sufficient rather than widening the safety
+    invariant's scope to accommodate a subprocess-spawning test.
+- Final suite: 16 files, 151 tests, 100% passing; type-check clean.
+- Stage 3.9 VERIFY_PLAN: same known non-blocking multi-line `verify:` block
+  parsing limitation as iterations 1-3 (not re-derived this iteration,
+  established pattern) — substance independently verified via the full
+  Must-Pass re-check below.
+
+## Iteration 4 — CLOSED: criteria 4+5 fully satisfied (PASS)
+
+- All 6 Must-Pass verify commands re-checked fresh at close of iteration 4:
+  - C1 type-check: PASS
+  - C2 e2e:synthetic layer/concurrency proof: PASS
+  - C3 e2e:report self-contained HTML: PASS
+  - C4 e2e:real refuses without --confirm ("confirm" in stderr, exit != 0):
+    PASS
+  - C5 e2e:real --dry-run --confirm --layers L0..L5 (exit 0, all 6 layer ids
+    present): PASS
+  - C6 unit tests (stub-upstream + build-report): PASS, 23/23
+- All 6 Must Pass rubric criteria are now satisfied. Only the Should Pass
+  item remains: `test/e2e/README.md` documenting invocation
+  (`npm run e2e:synthetic`, `npm run e2e:report`, `npm run e2e:real --
+  --confirm`) and the real-CLI harness's cost/credential requirements.
+  Selected as the next (and final, non-loop-gated) piece of work before
+  DELIVER — it's the sole remaining rubric item and has no verify-command
+  dependency ordering.
