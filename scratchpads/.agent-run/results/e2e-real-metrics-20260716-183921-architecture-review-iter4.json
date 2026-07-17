@@ -1,0 +1,20 @@
+{
+  "verdict": "CLEAN",
+  "violations": [
+    {
+      "check": "DRY",
+      "severity": "advisory",
+      "file": "test/e2e/real-cli/run-real-cli.ts",
+      "line": 64,
+      "description": "RealLayerResult re-declares a result shape that structurally overlaps LayerResult in run-synthetic.ts:31-40, and the cacheHitRate formula (requests === 0 ? 0 : cacheReads / requests) is duplicated verbatim from run-synthetic.ts's runLayer. Root cause is the same one iteration 3's architecture-reviewer already logged as advisory (commit 9e57932): run-synthetic.ts has no guarded entry point, so importing its types/helpers isn't safe. This diff doesn't touch run-synthetic.ts, so fixing it is out of scope here too - advisory, not blocking, same disposition as last time. Now duplicated in a second file; worth a follow-up to guard run-synthetic.ts and centralize cacheHitRate computation once that file is touched again.",
+      "existing_implementation": "test/e2e/synthetic/run-synthetic.ts:31-40,167"
+    }
+  ],
+  "notes": [
+    "Layer/module boundaries correct: imports only ../layers.js (getLayer, LayerDefinition, LayerId), ../../../src/telemetry.js (TelemetryStore), ../../../src/types.js (Usage), plus node:util/node:url stdlib. No import from run-synthetic.ts (correctly avoids its unguarded top-level main()). No reach into src/config.ts/src/presets.ts directly - stays encapsulated behind layers.ts.",
+    "Pattern consistency: the guarded-CLI-entry check (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) is byte-identical to build-report.ts's established pattern. main().catch(...) error handling, relative .js import specifiers, node:-prefixed builtins, and named-constant-over-magic-number style all match run-synthetic.ts/telemetry.ts conventions.",
+    "CLI-arg-parsing: parseRealCliArgs hand-rolls its own parseArgs call, consistent with run-synthetic.ts's own un-exported parseCliArgs - no shared CLI-parsing helper exists anywhere in the codebase for either file to reuse, so this is not new duplication.",
+    "Safety-rail correctness verified structurally: zero subprocess/network code confirmed by direct read (no child_process, fetch(, node:http) and self-enforced by a runtime-assembled-substring source grep test. Gate ordering in main() matches the micro-plan: confirm-refusal happens before any layer/numeric validation, estimate printing, or cap check.",
+    "Functional note (out of scope for this review, surfaced for a future iteration): --model is parsed but runLayerDry/createDryRunRunner never receives it - the dry-run stub ignores ctx.model entirely, so a future live runner honoring ctx.model would find --model has silently done nothing today. Not a layering or DRY violation; flagged for visibility only."
+  ]
+}
