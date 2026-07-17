@@ -1,4 +1,5 @@
 import { parseArgs } from 'node:util'
+import { pathToFileURL } from 'node:url'
 import { getLayer, type LayerDefinition, type LayerId } from '../layers.js'
 import { TelemetryStore } from '../../../src/telemetry.js'
 import type { Usage } from '../../../src/types.js'
@@ -188,4 +189,87 @@ export async function runLayerDry(
     estSavedUsd: stats.estSavedUsd,
     failures,
   }
+}
+
+async function main(): Promise<void> {
+  const raw = parseRealCliArgs(process.argv.slice(2))
+
+  // Gate (2): refuse before ANY layer resolution, counting, estimating, or
+  // orchestration — this is rubric criterion 4's contract.
+  if (!raw.confirm) {
+    console.error(CONFIRM_REFUSAL_MESSAGE)
+    process.exitCode = 1
+    return
+  }
+
+  // Gate (3): validate --layers and numeric flags.
+  let selectedLayers: LayerDefinition[]
+  let instances: number
+  let turns: number
+  let forceInstances: number | undefined
+  try {
+    selectedLayers = selectLayers(raw.layers)
+    instances = parsePositiveInt('--instances', raw.instances)
+    turns = parsePositiveInt('--turns', raw.turns)
+    forceInstances = raw.forceInstances !== undefined ? parsePositiveInt('--force-instances', raw.forceInstances) : undefined
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err))
+    process.exitCode = 1
+    return
+  }
+
+  // Gate (4): print the budget estimate — appears in both dry-run and
+  // live-refusal outputs (criterion 5 names "budget-estimate printing").
+  const estimate = estimateSpendUsd(selectedLayers.length, instances, turns)
+  console.log(
+    `estimated total spend: $${estimate.toFixed(4)} (${selectedLayers.length} layers x ${instances} instances x ${turns} turns x ~1000 tok/turn @ $1/MTok, model ${raw.model})`,
+  )
+
+  // Gate (5): hard-cap check — runs in dry-run too, it IS orchestration logic.
+  const total = selectedLayers.length * instances
+  const cap = forceInstances ?? MAX_TOTAL_INVOCATIONS
+  if (total > cap) {
+    console.error(
+      `refusing: ${total} total invocations exceeds the hard cap of ${MAX_TOTAL_INVOCATIONS} — pass --force-instances <n> to override`,
+    )
+    process.exitCode = 1
+    return
+  }
+
+  // Gate (6): dry-run orchestration.
+  if (raw.dryRun) {
+    const runner = createDryRunRunner()
+    const zeroRequestLayers: LayerId[] = []
+
+    for (const layer of selectedLayers) {
+      const result = await runLayerDry(layer, instances, turns, runner)
+      console.log(
+        `${result.id} ${result.label}: requests=${result.requests} cacheHitRate=${result.cacheHitRate.toFixed(3)} estSavedUsd=$${result.estSavedUsd.toFixed(6)} failures=${result.failures}`,
+      )
+      if (result.requests === 0) zeroRequestLayers.push(result.id)
+    }
+
+    if (zeroRequestLayers.length > 0) {
+      console.error(`real-cli harness: layer(s) with zero successful requests: ${zeroRequestLayers.join(', ')}`)
+      process.exitCode = 1
+      return
+    }
+
+    console.log('dry-run complete: no subprocesses spawned, no network calls made')
+    return
+  }
+
+  // Gate (7): confirmed live run — safe stub this iteration (decision 10).
+  console.error(LIVE_NOT_IMPLEMENTED_MESSAGE)
+  process.exitCode = 1
+}
+
+// Guarded CLI entry: runs only when this file is the process's actual entry
+// point (tsx CLI invocation), not when it's merely imported (e.g. by vitest
+// for the pure exports above). Same pattern as test/e2e/report/build-report.ts.
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err: unknown) => {
+    console.error(err)
+    process.exitCode = 1
+  })
 }
