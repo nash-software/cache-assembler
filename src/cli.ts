@@ -27,6 +27,8 @@ Options:
   --preset <name>  Named preset (e.g. "claude-code") supplying F3 deferral extractors
   --defer          Enable F3 volatile-byte deferral (active mode)
   --dry-run        Force F3 deferral into dry-run (report only, no bytes moved)
+  --trace-log <path>  Append one JSON line per proxied request to this file
+                   (tokens, cost, barrier role, latency) — opt-in, off by default
   --help           Show this help text
   --version        Print the package version
 `
@@ -58,6 +60,7 @@ interface ParsedCliValues {
   preset?: string
   defer?: boolean
   'dry-run'?: boolean
+  'trace-log'?: string
   help?: boolean
   version?: boolean
 }
@@ -72,6 +75,7 @@ function parseCliArgs(argv: string[]): ParsedCliValues {
       preset: { type: 'string' },
       defer: { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
+      'trace-log': { type: 'string' },
       help: { type: 'boolean', default: false },
       version: { type: 'boolean', default: false },
     },
@@ -116,7 +120,7 @@ export function run(argv: string[], io: CliIO = DEFAULT_IO): number | undefined 
   // network. LAN/network exposure is opt-in via an explicit --host.
   const host = values.host ?? DEFAULT_HOST
   const config = buildConfig(values)
-  const server = createProxyServer({ upstream: values.upstream, config })
+  const server = createProxyServer({ upstream: values.upstream, config, traceLogPath: values['trace-log'] })
   server.listen(port, host, () => {
     io.stdout(`${PACKAGE_NAME} listening on http://${host}:${port}\n`)
   })

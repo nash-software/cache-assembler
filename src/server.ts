@@ -8,11 +8,13 @@ import {
   type ServerResponse,
 } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import type { AnthropicRequestLike, AssemblerState, Usage } from './types.js'
+import { appendFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import type { AnthropicRequestLike, AssembleReport, AssemblerState, Usage } from './types.js'
 import { resolveConfig, type CacheAssemblerConfig } from './config.js'
 import { assemble } from './assemble.js'
 import { WriteBarrier, type WriteBarrierRole } from './barrier.js'
-import { TelemetryStore } from './telemetry.js'
+import { TelemetryStore, computeRequestEconomics, type RequestEconomics } from './telemetry.js'
 
 export interface ProxyServerOptions {
   upstream: string
@@ -22,6 +24,12 @@ export interface ProxyServerOptions {
   state?: AssemblerState
   /** Max request body size in bytes before a 413 is returned. Default 10MB. */
   maxBodyBytes?: number
+  /**
+   * Path to append one JSON line per proxied request to, for line-by-line
+   * analysis of concurrent-session cache economics. Opt-in — omit to skip
+   * tracing entirely with zero behavior change.
+   */
+  traceLogPath?: string
 }
 
 const MESSAGES_PATH = '/v1/messages'
@@ -109,6 +117,53 @@ interface UpstreamResponse {
   body: IncomingMessage
 }
 
+const REDACTED_HEADER_KEYS = new Set(['authorization', 'x-api-key', 'cookie', 'set-cookie'])
+
+/**
+ * Redacts known-sensitive headers by key but otherwise keeps everything —
+ * we don't know in advance which header (if any) a client uses to
+ * distinguish concurrent sessions/agents, so the trace log captures the
+ * full set rather than a pre-decided allowlist.
+ */
+function safeHeaders(headers: IncomingHttpHeaders): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    if (value === undefined) continue
+    out[key] = REDACTED_HEADER_KEYS.has(key.toLowerCase()) ? '[redacted]' : Array.isArray(value) ? value.join(', ') : value
+  }
+  return out
+}
+
+interface TraceEntry {
+  ts: string
+  requestId: string
+  pathname: string
+  remotePort?: number
+  headers: Record<string, string>
+  prefixHash?: string
+  barrierRole?: WriteBarrierRole
+  assemble?: {
+    canonicalizeApplied: boolean
+    breakpointsPlaced: number
+    deferralMode: AssembleReport['features']['deferral']['mode']
+    deferredCount: number
+  }
+  assembleError?: string
+  usage?: Usage
+  economics?: RequestEconomics
+  latencyMs: number
+  upstreamStatus?: number
+  error?: string
+}
+
+function writeTrace(path: string, entry: TraceEntry): void {
+  try {
+    appendFileSync(path, `${JSON.stringify(entry)}\n`, 'utf8')
+  } catch (err) {
+    console.error(`${LOG_PREFIX} trace log write failed`, err)
+  }
+}
+
 /**
  * Never forwards the client's own accept-encoding — forces 'identity' so the
  * upstream response body is always plain text. Without this, a real
@@ -166,11 +221,31 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
   const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES
 
   async function handleProxiedRequest(req: IncomingMessage, res: ServerResponse, pathname: string): Promise<void> {
+    const startedAt = Date.now()
+    const trace: TraceEntry | undefined =
+      opts.traceLogPath === undefined
+        ? undefined
+        : {
+            ts: new Date(startedAt).toISOString(),
+            requestId: randomUUID(),
+            pathname,
+            remotePort: req.socket.remotePort,
+            headers: safeHeaders(req.headers),
+            latencyMs: 0,
+          }
+    const emitTrace = (): void => {
+      if (trace === undefined || opts.traceLogPath === undefined) return
+      trace.latencyMs = Date.now() - startedAt
+      writeTrace(opts.traceLogPath, trace)
+    }
+
     let rawBody: string
     try {
       rawBody = await readRequestBody(req, maxBodyBytes)
     } catch (err) {
       if (err instanceof PayloadTooLargeError) {
+        if (trace !== undefined) trace.error = 'payload too large'
+        emitTrace()
         sendJson(res, 413, { error: 'payload too large' })
         return
       }
@@ -184,8 +259,18 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       const result = assemble(originalReq, opts.config ?? {}, state)
       outgoingBody = JSON.stringify(result.req)
       prefixHash = result.report.prefixHash
+      if (trace !== undefined) {
+        trace.prefixHash = prefixHash
+        trace.assemble = {
+          canonicalizeApplied: result.report.features.canonicalize.applied,
+          breakpointsPlaced: result.report.features.breakpoints.placed.length,
+          deferralMode: result.report.features.deferral.mode,
+          deferredCount: result.report.features.deferral.moved.length,
+        }
+      }
     } catch (err) {
       console.error(`${LOG_PREFIX} assemble failed, forwarding original request`, err)
+      if (trace !== undefined) trace.assembleError = err instanceof Error ? err.message : String(err)
     }
 
     let role: WriteBarrierRole = 'leader'
@@ -196,10 +281,12 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
         console.error(`${LOG_PREFIX} barrier enter failed, proceeding without coordination`, err)
       }
     }
+    if (trace !== undefined) trace.barrierRole = cfg.barrier.enabled ? role : undefined
 
     try {
       const upstreamRes = await forwardToUpstream(opts.upstream, pathname, req.headers, outgoingBody)
       res.writeHead(upstreamRes.statusCode, upstreamRes.headers)
+      if (trace !== undefined) trace.upstreamStatus = upstreamRes.statusCode
 
       const chunks: Buffer[] = []
       let firstByteSignaled = false
@@ -219,11 +306,20 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
 
       if (cfg.telemetry.enabled && prefixHash !== undefined) {
         const usage = extractUsage(Buffer.concat(chunks).toString('utf8'))
-        if (usage !== undefined) telemetry.record({ prefixHash, usage })
+        if (usage !== undefined) {
+          telemetry.record({ prefixHash, usage })
+          if (trace !== undefined) {
+            trace.usage = usage
+            trace.economics = computeRequestEconomics(usage, telemetry.pricing())
+          }
+        }
       }
+      emitTrace()
     } catch (err) {
       if (cfg.barrier.enabled && prefixHash !== undefined) barrier.fail(prefixHash)
       console.error(`${LOG_PREFIX} upstream request failed`, err)
+      if (trace !== undefined) trace.error = err instanceof Error ? err.message : String(err)
+      emitTrace()
       if (!res.headersSent) sendJson(res, 502, { error: 'upstream request failed' })
       else res.end()
     }

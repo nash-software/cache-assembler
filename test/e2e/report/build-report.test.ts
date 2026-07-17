@@ -91,11 +91,11 @@ const SYNTHETIC_FIXTURE: HarnessOutput = {
 
 describe('computeEstSavedUsd', () => {
   it('reproduces the recorded L2 estSavedUsd (negative) by reusing TelemetryStore', () => {
-    expect(computeEstSavedUsd(1770, 5356)).toBeCloseTo(-0.010227, 6)
+    expect(computeEstSavedUsd(1770, 5356)).toBeCloseTo(-0.011289, 6)
   })
 
   it('reproduces the recorded L5 estSavedUsd (positive)', () => {
-    expect(computeEstSavedUsd(4072, 2619)).toBeCloseTo(0.0055806, 6)
+    expect(computeEstSavedUsd(4072, 2619)).toBeCloseTo(0.0031374, 6)
   })
 
   it('returns 0 for zero tokens', () => {

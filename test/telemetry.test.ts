@@ -82,11 +82,13 @@ describe('TelemetryStore (F5 pricing and cost estimation)', () => {
     store.record({ prefixHash: 'a', usage: usage({ cache_read_input_tokens: 4_000_000 }) })
 
     const stats = store.stats()
-    // estLostUsd = (writes * writePrice - totalCacheTokens * basePrice) / 1e6
-    //            = (1e6 * 6 - 5e6 * 3) / 1e6 = -9
-    expect(stats.estLostUsd).toBeCloseTo(-9, 6)
-    // estSavedUsd = (reads * readPrice) / 1e6 - estLostUsd = 1.2 - (-9) = 10.2
-    expect(stats.estSavedUsd).toBeCloseTo(10.2, 6)
+    // estLostUsd = writes * (basePrice - writePrice) / 1e6 = 1e6 * (3 - 6) / 1e6 = -3
+    expect(stats.estLostUsd).toBeCloseTo(-3, 6)
+    // estSavedUsd (net) = counterfactual - actual
+    //   counterfactual = (1e6 + 4e6) * 3 / 1e6 = 15
+    //   actual = (1e6 * 6 + 4e6 * 0.3) / 1e6 = 7.2
+    //   net = 15 - 7.2 = 7.8
+    expect(stats.estSavedUsd).toBeCloseTo(7.8, 6)
   })
 
   it('accepts overridable per-MTok pricing via constructor options', () => {
@@ -97,10 +99,13 @@ describe('TelemetryStore (F5 pricing and cost estimation)', () => {
     store.record({ prefixHash: 'a', usage: usage({ cache_read_input_tokens: 1_000_000 }) })
 
     const stats = store.stats()
-    // estLostUsd = (1e6 * 20 - 2e6 * 10) / 1e6 = 0
-    expect(stats.estLostUsd).toBeCloseTo(0, 6)
-    // estSavedUsd = (1e6 * 1) / 1e6 - 0 = 1
-    expect(stats.estSavedUsd).toBeCloseTo(1, 6)
+    // estLostUsd = 1e6 * (10 - 20) / 1e6 = -10
+    expect(stats.estLostUsd).toBeCloseTo(-10, 6)
+    // estSavedUsd (net) = counterfactual(2e6*10/1e6=20) - actual(1e6*20+1e6*1)/1e6=21) = -1
+    // (Genuinely a net loss at these prices with equal read/write volume:
+    // the 2x write premium isn't offset by the 0.1x read discount unless
+    // reads substantially outnumber writes.)
+    expect(stats.estSavedUsd).toBeCloseTo(-1, 6)
   })
 
   it('reports zero estSavedUsd/estLostUsd when no cache activity has been recorded', () => {
