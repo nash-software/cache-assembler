@@ -4,7 +4,7 @@
   "plan_file": "scratchpads/e2e-real-metrics-goal.md",
   "started_at": "2026-07-16T18:39:21Z",
   "status": "in-progress",
-  "last_update": "2026-07-17T00:45:00Z",
+  "last_update": "2026-07-17T00:20:00Z",
   "agents": {
     "vps_dispatch": {
       "status": "stale-superseded",
@@ -29,10 +29,16 @@
       "reason": "criterion 2 (synthetic harness L0-L5 + concurrency proof) verified PASS iteration close-out"
     },
     "pipeline-iter-3": {
-      "status": "in-progress",
+      "status": "done",
       "run_file": ".agent-run/runs/e2e-real-metrics-iter3.md",
       "criterion": 3,
-      "current_stage": "PLAN_REVIEW"
+      "reason": "criterion 3 (report builder self-contained HTML) and criterion 6 (both pure-logic test files) verified PASS iteration close-out"
+    },
+    "pipeline-iter-4": {
+      "status": "in-progress",
+      "run_file": ".agent-run/runs/e2e-real-metrics-iter4.md",
+      "criterion": 4,
+      "current_stage": "PLAN"
     }
   }
 }

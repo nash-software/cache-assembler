@@ -1,11 +1,11 @@
 loop_started_at: 2026-07-16T20:57:00Z
-iteration: 3
+iteration: 4
 consecutive_failures:
   1: 0
   2: 0
   3: 0
-  4: 0
-  5: 0
+  4: 1
+  5: 1
   6: 0
 
 ## Iteration 1 — pre-work notes
@@ -154,3 +154,74 @@ consecutive_failures:
   resources). This is the next foundational piece — criterion 6's
   build-report.test.ts depends on it, and criteria 4/5 (real-CLI harness)
   are independent of it, so no ordering constraint forces them first.
+
+## Iteration 3 — resumed after second tmux/OOM crash
+
+- Prior session crashed mid-BUILD with steps 1/3 (667d907) and 2/3 (338c443)
+  committed and step 3/3's test file (`test/e2e/report/build-report.test.ts`)
+  written but uncommitted. Resumed session: reviewed the test file against
+  micro-plan decision 6 (well-formed — aggregation math pinned to real L2/L5
+  values, section keywords, script/link absence, real-absent note, NaN-free
+  negative bars, real-before-synthetic ordering, empty-input throw), ran full
+  regression (type-check 0 errors, vitest 15 files/115 tests), ran the
+  verbatim criterion-3 verify command, the stronger self-containment check,
+  and the criterion-6 verify command — all passed. Committed step 3/3
+  (0d507a4).
+- Stage 3.9 VERIFY_PLAN: exit 1 (UNVERIFIED) — same known multi-line
+  `verify:` block parsing limitation as iterations 1-2 (6 ACs parsed,
+  classified unknown, not skeleton detection). Non-blocking, substance
+  independently verified above.
+- Removed stray `scratchpads/e2e-real-metrics-micro-3-plan.md` duplicate
+  (same plan-gate-naming workaround pattern as iterations 1-2).
+- Dispatched architecture-reviewer + tester in parallel (Stage 3.5/4):
+  - architecture-reviewer: VIOLATIONS blocking=0 advisory=2, both tied to
+    one root cause — `build-report.ts` re-declares `LayerResult`/
+    `ConcurrencyResult`/`HarnessOutput` rather than importing them from
+    `run-synthetic.ts`, because that file calls `main()` unguarded at
+    top-level import time (would trigger a full harness run on import). The
+    real fix (guard `run-synthetic.ts`'s `main()`, export its types) is out
+    of scope for this diff. Non-blocking, logged for eventual PR body.
+  - tester: found genuine pure-logic coverage gaps — `renderBarChart` and
+    `escapeHtml` were only exercised indirectly; the "did not reduce"
+    concurrency-verdict branch, untrusted-label escaping end-to-end, and
+    real-only input (`{real}` with no `synthetic`) were untested. Added 7
+    tests directly to `build-report.test.ts` (122/122 suite passing,
+    type-check clean), left uncommitted per instructions. Orchestrator
+    reviewed the diff and committed (9e57932) along with the archived
+    verify-plan report and architecture-review result JSON.
+- Environmental note: a stray `C:/` directory (containing `.handbook`
+  intermediate cache files for unrelated projects — herald, relay,
+  conductor, etc.) gets created at the repo root, apparently by some
+  session-level hook firing on Bash tool calls in this worktree (not
+  related to this task; recreated even after being moved aside once
+  mid-session, including by the parallel subagents' own Bash calls). Not
+  gitignored per the iteration-3 micro-plan's explicit "no `.gitignore`
+  changes" regression guard — just move it out of the working tree (don't
+  delete; contents look like regenerable cache data but ownership is
+  unclear) before each commit/verify cycle for the remainder of this loop.
+  Worth a one-line `.gitignore` fix or hook investigation once the loop
+  closes, but out of scope for this rubric.
+
+## Iteration 3 — CLOSED: criterion 3 fully satisfied (PASS), criterion 6 fully satisfied (PASS)
+
+- All Must-Pass verify commands re-checked fresh at close of iteration 3:
+  - C1 type-check: PASS
+  - C2 e2e:synthetic layer/concurrency proof: PASS
+  - C3 e2e:report self-contained HTML: PASS (verified above)
+  - C4 e2e:real refuses without --confirm: still FAIL (script missing —
+    `npm error Missing script: "e2e:real"`, not yet the intended
+    safety-rail refusal)
+  - C5 e2e:real --dry-run: still FAIL (script missing, same as C4)
+  - C6 unit tests (stub-upstream + build-report): PASS — both files exist,
+    23/23 tests passing (16 build-report + 7 stub-upstream... actually
+    combined run reports 23 total across the two files)
+- Next failing criterion for iteration 4: **criterion 4** (real-CLI harness
+  refuses to run without `--confirm` — safety rail, no subprocess spawn, no
+  network call). Selected over criterion 5 because it's the narrower,
+  foundational piece of the same `test/e2e/real/run-real.ts` script that
+  criterion 5 (`--dry-run` full orchestration) builds on top of — the
+  safety-rail check must exist before the dry-run path is meaningful to
+  exercise. Both will likely land in the same script; the micro-plan for
+  iteration 4 should aim to satisfy criterion 4 fully and may pick up
+  criterion 5 as a natural byproduct if scope allows, but criterion 4 is the
+  formal target.
