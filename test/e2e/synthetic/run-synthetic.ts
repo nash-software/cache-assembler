@@ -135,7 +135,7 @@ async function runLayer(layer: LayerDefinition, instances: number, turnsCount: n
   let targetUrl = `${stub.url()}${MESSAGES_PATH}`
   if (layer.proxy) {
     proxy = createProxyServer({ upstream: stub.url(), config: layer.config })
-    proxy.listen(0)
+    proxy.listen(0, '127.0.0.1')
     await once(proxy, 'listening')
     targetUrl = `${serverUrl(proxy)}${MESSAGES_PATH}`
   }

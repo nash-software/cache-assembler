@@ -155,7 +155,7 @@ function renderRawNumbersTable(layerIds: ReadonlyArray<string>, layers: Record<s
     .map((id) => {
       const layer = getLayer(layers, id)
       const saved = computeEstSavedUsd(layer.cacheReadTokens, layer.cacheCreationTokens)
-      return `<tr><td>${escapeHtml(id)} — ${escapeHtml(layer.label)}</td><td>${layer.requests}</td><td>${layer.cacheReads}</td><td>${layer.cacheWrites}</td><td>${layer.cacheReadTokens}</td><td>${layer.cacheCreationTokens}</td><td>$${saved.toFixed(6)}</td><td>${layer.failures}</td></tr>`
+      return `<tr><td>${escapeHtml(id)} — ${escapeHtml(layer.label)}</td><td>${escapeHtml(String(layer.requests))}</td><td>${escapeHtml(String(layer.cacheReads))}</td><td>${escapeHtml(String(layer.cacheWrites))}</td><td>${escapeHtml(String(layer.cacheReadTokens))}</td><td>${escapeHtml(String(layer.cacheCreationTokens))}</td><td>$${saved.toFixed(6)}</td><td>${escapeHtml(String(layer.failures))}</td></tr>`
     })
     .join('\n')
 
@@ -199,7 +199,7 @@ function renderHarnessSection(title: string, data: HarnessOutput): string {
     '<h3>Raw numbers</h3>',
     renderRawNumbersTable(layerIds, data.layers),
     '<h2>Concurrency proof</h2>',
-    `<p>Instances: ${concurrency.instances}. Barrier-on writes: ${concurrency.barrierOnWrites}. Barrier-off writes: ${concurrency.barrierOffWrites}.</p>`,
+    `<p>Instances: ${escapeHtml(String(concurrency.instances))}. Barrier-on writes: ${escapeHtml(String(concurrency.barrierOnWrites))}. Barrier-off writes: ${escapeHtml(String(concurrency.barrierOffWrites))}.</p>`,
     `<p>${escapeHtml(verdict)}</p>`,
     '</div>',
   ].join('\n')

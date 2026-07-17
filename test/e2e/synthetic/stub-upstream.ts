@@ -221,7 +221,7 @@ export function createStubUpstream(options: StubUpstreamOptions = {}): StubUpstr
     })
   })
 
-  server.listen(0)
+  server.listen(0, '127.0.0.1')
 
   return {
     server,
