@@ -1,5 +1,11 @@
 ---
+status: in-progress
 spec_ref: docs/superpowers/specs/2026-07-16-e2e-real-metrics-design.md
+files:
+  - test/e2e/report/build-report.ts
+  - test/e2e/report/template.html
+  - test/e2e/report/build-report.test.ts
+  - package.json
 ---
 
 # Micro-plan 3: Report builder — self-contained HTML with SVG charts
