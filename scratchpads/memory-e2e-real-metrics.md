@@ -308,3 +308,57 @@ consecutive_failures:
   Selected as the next (and final, non-loop-gated) piece of work before
   DELIVER — it's the sole remaining rubric item and has no verify-command
   dependency ordering.
+
+## DELIVER gate
+
+- Codex spec/diff review (codex-diff): SKIPPED — same `gpt-5.4` /
+  ChatGPT-account model error hit in iterations 1-2, confirmed again on the
+  full-branch review. Environment issue outside this session's control, not
+  something a retry fixes; logged for the PR body per the established
+  bypass pattern rather than blocking delivery on it.
+- security-scanner: found two cheap, genuine findings — (1) report
+  builder's raw numeric result-JSON fields bypassed `escapeHtml` (XSS-classed
+  defense-in-depth gap, since those fields are runtime-untyped after
+  `JSON.parse` + an unchecked cast); (2) `stub-upstream.ts`/`run-synthetic.ts`
+  test HTTP servers called `.listen(0)` with no host, binding the
+  unspecified address instead of loopback (both already construct URLs
+  assuming 127.0.0.1). Fixed both directly (commit a4c9dde), re-verified
+  full suite (151/151) + all 6 Must Pass commands, no regressions. Two other
+  findings (`--max-budget-usd` unenforced, `--model` unvalidated) were
+  correctly judged as already-scoped-out by the approved iteration-4 plan
+  (inert until the live subprocess path lands) — noted for the PR body, not
+  fixed now.
+- verifier-final: PASS 6/6 Must Pass + Should Pass, all commands
+  independently re-executed with real output observed (not trusted from
+  commit messages) — but escalated criterion 5 for a 2-of-3 panel: the
+  criterion's prose says "against a stubbed `claude` executable" while the
+  implementation uses an in-process function stub (the live subprocess path
+  is explicitly deferred, per the approved micro-4 plan's decisions 7/10).
+  Verify command itself passes unambiguously either way (only checks exit
+  code + layer ids in stdout); the question was intent/spirit, not the
+  falsifiable contract.
+- 2-of-3 escalation panel on criterion 5 (three independent fresh-context
+  graders, no cross-visibility): PASS, PASS, PASS — unanimous 3/3. Consistent
+  reasoning across all three: the verify command is the criterion's actual
+  falsifiable contract and passes on genuinely-computed (not gamed) output;
+  every concretely named requirement (layer iteration, instance/turn counts,
+  budget-estimate printing) is demonstrably exercised through the real
+  TelemetryStore; "stub" in testing vocabulary properly means an in-process
+  stand-in behind a seam (TurnRunner), not necessarily a subprocess; the
+  criterion's own stated safety goal ("never the real network") is satisfied
+  *unconditionally* by construction since this build ships zero
+  subprocess/network code in any path; and the live-path deferral was a
+  reasoned, upfront, plan-approved scope decision, not a shortcut discovered
+  under pressure.
+- Rubric gaps surfaced by verifier-final for future rubric authors (recorded
+  here per its read-only request, not acted on — out of scope to edit the
+  rubric mid-loop): criterion 5's grep is technically self-satisfying since
+  npm echoes the invocation line containing the layer ids before the
+  harness's own output; criterion 3's keyword check doesn't verify charts
+  actually render (needed manual SVG/table inspection). Both criteria were
+  independently confirmed to pass on their *substance*, not just the
+  technically-satisfiable text match — noted for whoever authors the next
+  rubric in this family.
+- All 6 Must Pass + the Should Pass criterion: confirmed PASS, unanimous
+  across builder self-check, orchestrator re-check, verifier-final, and the
+  3/3 escalation panel. Proceeding to pr-scorer + PR open.
