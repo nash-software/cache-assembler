@@ -75,16 +75,26 @@ describe('buildSessionTurns', () => {
     expect(new Set(systems).size).toBe(1)
   })
 
-  it('shares identical raw tool bytes across every turn of the same instance', () => {
+  it('jitters raw tool key order turn to turn within the SAME instance (F1 has something real to fix)', () => {
     const requests = buildSessionTurns(7, params, 3)
     const tools = requests.map((r) => JSON.stringify(r.tools))
-    expect(new Set(tools).size).toBe(1)
+    // Every turn's raw bytes differ from every other turn's — simulating a
+    // client that re-serializes tool definitions inconsistently request to
+    // request, not just session to session.
+    expect(new Set(tools).size).toBe(tools.length)
   })
 
-  it('jitters raw tool key order across different instances (F1 has something real to fix)', () => {
+  it('jitters raw tool key order across different instances too', () => {
     const [instanceA] = buildSessionTurns(0, params, 1)
     const [instanceB] = buildSessionTurns(1, params, 1)
     expect(JSON.stringify(instanceA!.tools)).not.toBe(JSON.stringify(instanceB!.tools))
+  })
+
+  it('canonicalizeRequest erases turn-to-turn jitter within one instance back to identical tool bytes', () => {
+    const requests = buildSessionTurns(7, params, 3)
+    const cfg = { canonicalize: { enabled: true } }
+    const canonicalTools = requests.map((r) => JSON.stringify(canonicalizeRequest(r, cfg).tools))
+    expect(new Set(canonicalTools).size).toBe(1)
   })
 
   it('canonicalizeRequest erases the cross-instance jitter back to identical tool bytes', () => {

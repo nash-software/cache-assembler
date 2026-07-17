@@ -75,15 +75,20 @@ function templatedSystem(system: SystemBlock[], params: VolatileParams): SystemB
 }
 
 /**
- * Deterministic per-instance key-order shuffle: sorts an object's own keys by
- * the hash of `${seed}:${key}` rather than insertion order. Mimics the real
- * problem F1 canonicalization fixes — different client libraries (or
- * different runs of the same library) serializing the same tool definition
- * with different JSON key order. Seeded only by instanceIndex + tool name,
- * never by turn, so jitter varies across instances but stays identical
- * across every turn of the same instance (verified by
- * session-turns.test.ts's "shares identical volatile bytes across every
- * turn" invariant, which this must not break).
+ * Deterministic key-order shuffle: sorts an object's own keys by the hash of
+ * `${seed}:${key}` rather than insertion order. Mimics the real problem F1
+ * canonicalization fixes — different client libraries, or different runs of
+ * the SAME library/process, serializing the same tool definition with
+ * different JSON key order. Seeded by instanceIndex + turn + tool name, so
+ * jitter varies **per request** (simulating a client that re-serializes
+ * tools inconsistently turn to turn within one session) — not just across
+ * instances, since two independent instances never share cache lineage with
+ * each other anyway (each has unique volatile scratchpad/session-id
+ * content), so instance-only jitter can never produce a measurable F1
+ * effect. Volatile system content (scratchpad uuid, session id) is
+ * deliberately NOT jittered this way — those stay stable across a session's
+ * own turns, matching real Claude Code behavior; only tool serialization
+ * order is modeled as request-to-request unstable.
  */
 function jitterKeyOrder<T extends Record<string, unknown>>(obj: T, seed: string): T {
   const keys = Object.keys(obj).sort((a, b) => sha256Hex(`${seed}:${a}`).localeCompare(sha256Hex(`${seed}:${b}`)))
@@ -92,11 +97,11 @@ function jitterKeyOrder<T extends Record<string, unknown>>(obj: T, seed: string)
   return jittered as T
 }
 
-function templatedTools(tools: ToolDefinition[], params: VolatileParams, instanceIndex: number): ToolDefinition[] {
+function templatedTools(tools: ToolDefinition[], params: VolatileParams, instanceIndex: number, turn: number): ToolDefinition[] {
   return tools.map((tool) =>
     jitterKeyOrder(
       { ...tool, description: tool.description?.replace(FIXTURE_SESSION_URL, params.sessionUrl) },
-      `synthetic-instance-${instanceIndex}-tool-${tool.name}`,
+      `synthetic-instance-${instanceIndex}-turn-${turn}-tool-${tool.name}`,
     ),
   )
 }
@@ -134,22 +139,23 @@ function buildMessagesUpTo(k: number): MessageParam[] {
  * `[u1,a1,...,u_k]` as text-block arrays. The two system blocks carry
  * `params`' volatile spans templated in place of the fixture's hardcoded
  * ones, so every turn of a given instance shares the same volatile bytes
- * (mimicking a real Claude Code session). Tool definitions additionally get
- * a per-instance key-order jitter (see `jitterKeyOrder`) — deliberately
- * non-identical raw bytes across instances, so F1 canonicalization has a
- * real effect to test instead of a no-op.
+ * (mimicking a real Claude Code session). Tool definitions get a fresh
+ * per-turn key-order jitter (see `jitterKeyOrder`) — deliberately
+ * non-identical raw bytes turn to turn within the SAME instance, so F1
+ * canonicalization has a real effect to test: without it, tool-serialization
+ * noise breaks the cache every single turn; with it, the noise is erased and
+ * the cache holds.
  */
 export function buildSessionTurns(instanceIndex: number, params: VolatileParams, turns = 6): AnthropicRequestLike[] {
   const base = readFixtureFile()
   const system = templatedSystem((base.system ?? []) as SystemBlock[], params)
-  const tools = templatedTools(base.tools ?? [], params, instanceIndex)
 
   const requests: AnthropicRequestLike[] = []
   for (let k = 1; k <= turns; k++) {
     requests.push({
       model: base.model,
       system,
-      tools,
+      tools: templatedTools(base.tools ?? [], params, instanceIndex, k),
       messages: buildMessagesUpTo(k),
     })
   }
