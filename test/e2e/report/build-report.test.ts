@@ -3,6 +3,8 @@ import {
   buildReportHtml,
   computeCacheHitRate,
   computeEstSavedUsd,
+  escapeHtml,
+  renderBarChart,
   type HarnessOutput,
 } from './build-report.js'
 
@@ -146,5 +148,80 @@ describe('buildReportHtml', () => {
 
   it('throws when neither synthetic nor real data is given', () => {
     expect(() => buildReportHtml({})).toThrow()
+  })
+
+  it('renders the "did not reduce" concurrency verdict when barrier-on writes are not fewer than barrier-off', () => {
+    const fixture: HarnessOutput = {
+      ...SYNTHETIC_FIXTURE,
+      concurrency: { instances: 8, barrierOnWrites: 8, barrierOffWrites: 8 },
+    }
+    const html = buildReportHtml({ synthetic: fixture })
+    expect(html).toMatch(/did not reduce concurrent identical-prefix writes/i)
+  })
+
+  it('escapes untrusted layer label text from the harness JSON so it cannot inject markup', () => {
+    const fixture: HarnessOutput = {
+      ...SYNTHETIC_FIXTURE,
+      layers: {
+        ...SYNTHETIC_FIXTURE.layers,
+        L0: { ...SYNTHETIC_FIXTURE.layers.L0!, label: '<script>alert(1)</script>' },
+      },
+    }
+    const html = buildReportHtml({ synthetic: fixture })
+    expect(html).not.toContain('<script>alert(1)</script>')
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+  })
+
+  it('renders only the real-CLI section (no absent-note, no synthetic section) when only real data is given', () => {
+    const html = buildReportHtml({ real: SYNTHETIC_FIXTURE })
+    expect(html).toMatch(/real-cli results/i)
+    expect(html).not.toMatch(/real-cli results not present/i)
+    expect(html).not.toMatch(/synthetic \(n=/i)
+  })
+})
+
+describe('escapeHtml', () => {
+  it('escapes &, <, >, and " so untrusted text cannot inject markup or break attributes', () => {
+    expect(escapeHtml('<script>alert("x")</script> & Co')).toBe(
+      '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; Co',
+    )
+  })
+})
+
+describe('renderBarChart', () => {
+  it('escapes untrusted row labels and the chart title (not just aggregate report text)', () => {
+    const svg = renderBarChart([{ label: '<img src=x onerror=alert(1)>', value: 1 }], {
+      title: '<b>title</b>',
+      format: (value) => String(value),
+    })
+    expect(svg).not.toContain('<img src=x onerror=alert(1)>')
+    expect(svg).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    expect(svg).toContain('&lt;b&gt;title&lt;/b&gt;')
+  })
+
+  it('falls back to a range of 1 and renders NaN-free flat bars when every value is zero', () => {
+    const svg = renderBarChart(
+      [
+        { label: 'A', value: 0 },
+        { label: 'B', value: 0 },
+      ],
+      { title: 'zero domain', format: (value) => String(value) },
+    )
+    expect(svg).not.toMatch(/NaN/)
+    const barHeights = [...svg.matchAll(/<rect[^>]*height="([-\d.]+)"/g)].map((m) => Number(m[1]))
+    expect(barHeights).toHaveLength(2)
+    expect(barHeights.every((h) => h === 0)).toBe(true)
+  })
+
+  it('renders a negative-value bar below the zero baseline (barY at/after baseline, positive height)', () => {
+    const svg = renderBarChart([{ label: 'neg', value: -5 }], {
+      title: 'negative',
+      format: (value) => String(value),
+    })
+    const match = /<rect x="[-\d.]+" y="([-\d.]+)" width="[-\d.]+" height="([-\d.]+)"/.exec(svg)
+    expect(match).not.toBeNull()
+    const [, y, height] = match!
+    expect(Number(height)).toBeGreaterThan(0)
+    expect(Number.isNaN(Number(y))).toBe(false)
   })
 })

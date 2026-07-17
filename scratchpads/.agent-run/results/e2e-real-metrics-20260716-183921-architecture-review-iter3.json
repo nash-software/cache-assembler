@@ -1,0 +1,31 @@
+{
+  "verdict": "VIOLATIONS",
+  "violations": [
+    {
+      "check": "DRY",
+      "severity": "advisory",
+      "file": "test/e2e/report/build-report.ts",
+      "line": 11,
+      "description": "LayerResult, ConcurrencyResult, and HarnessOutput are structural copies of run-synthetic.ts's un-exported LayerResult/ConcurrencyResult/SyntheticOutput interfaces (run-synthetic.ts:31-55). The two definitions can drift silently since nothing enforces they stay in sync. The duplication is explained in the commit message and in an inline comment (run-synthetic.ts calls main() unguarded at module top level, so importing it for its types would execute a full synthetic harness run). The correct fix requires modifying run-synthetic.ts (export the interfaces + add the same import.meta.url guard build-report.ts itself now uses for its own main()), which is out of scope for this diff — hence advisory, not blocking.",
+      "existing_implementation": "test/e2e/synthetic/run-synthetic.ts:31-55"
+    },
+    {
+      "check": "PATTERN",
+      "severity": "advisory",
+      "file": "test/e2e/synthetic/run-synthetic.ts",
+      "line": 269,
+      "description": "build-report.ts introduces a guarded CLI entry point (process.argv[1]/import.meta.url check before calling main()), which is a better/safer pattern than run-synthetic.ts's unguarded top-level main() call. This is not a defect in the new code, but it creates a pattern inconsistency between the two e2e harness entry points and is also the root cause of the DRY finding above (run-synthetic.ts's types can't be imported without side effects). Worth a follow-up to retrofit the guard onto run-synthetic.ts.",
+      "existing_implementation": "test/e2e/report/build-report.ts:270"
+    }
+  ],
+  "notes": [
+    "No layer-ownership violations found: build-report.ts only imports TelemetryStore from src/telemetry.ts (a legitimate shared src/ dependency) and reuses its pricing formula via computeEstSavedUsd instead of re-deriving the cache-economics math locally — correct DRY reuse, not a violation.",
+    "No coupling creep: build-report.ts does not import from test/e2e/synthetic/* (only references it in a comment explaining the structural type copy), and no src/ file reaches into test/e2e/report/*. No circular imports introduced.",
+    "escapeHtml (build-report.ts:56) is a genuinely new utility with no existing HTML-escaping helper elsewhere in the repo - not a DRY violation. Pre-existing sha256Hex duplication across stub-upstream.ts/run-synthetic.ts/session-turns.ts predates this iteration and is out of scope.",
+    "package.json's new e2e:report script matches the e2e:synthetic entry exactly in form (tsx <path>).",
+    "Import style (relative .js specifiers, node: prefixed builtins, named exports), magic-number-as-named-constant usage, and try/catch + main().catch() error handling all match the conventions in run-synthetic.ts, stub-upstream.ts, and src/telemetry.ts.",
+    "build-report.test.ts follows the same vitest import/describe pattern as stub-upstream.test.ts and session-turns.test.ts.",
+    "test/e2e/results/ (including the generated report.html) is gitignored, so no build artifact was accidentally committed.",
+    "No new 'any' usage; strict-mode compliant."
+  ]
+}
