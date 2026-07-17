@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { pathToFileURL } from 'node:url'
 import { TelemetryStore } from '../../../src/telemetry.js'
 
 // Structural copies of the interfaces in test/e2e/synthetic/run-synthetic.ts
@@ -232,4 +234,42 @@ export function buildReportHtml(input: ReportInput): string {
   const templateUrl = new URL('./template.html', import.meta.url)
   const template = readFileSync(templateUrl, 'utf8')
   return template.replace('<!--REPORT_BODY-->', sections.join('\n'))
+}
+
+/** Reads and parses a result JSON file; returns undefined when the file is absent, throws on any other error (including malformed JSON). */
+function readHarnessOutputIfPresent(path: URL): HarnessOutput | undefined {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as HarnessOutput
+  } catch (err) {
+    if (err !== null && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') return undefined
+    throw err
+  }
+}
+
+async function main(): Promise<void> {
+  const resultsDir = new URL('../results/', import.meta.url)
+  const synthetic = readHarnessOutputIfPresent(new URL('synthetic.json', resultsDir))
+  const real = readHarnessOutputIfPresent(new URL('real-cli.json', resultsDir))
+
+  if (!synthetic && !real) {
+    console.log('no result files found — run npm run e2e:synthetic first')
+    process.exitCode = 1
+    return
+  }
+
+  const html = buildReportHtml({ synthetic, real })
+  await mkdir(resultsDir, { recursive: true })
+  const reportPath = new URL('report.html', resultsDir)
+  await writeFile(reportPath, html, 'utf8')
+  console.log(`report written to ${reportPath.pathname}`)
+}
+
+// Guarded CLI entry: runs only when this file is the process's actual entry
+// point (tsx CLI invocation), not when it's merely imported (e.g. by vitest
+// for the pure exports above). Live-verified this session under tsx.
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err: unknown) => {
+    console.error(err)
+    process.exitCode = 1
+  })
 }
