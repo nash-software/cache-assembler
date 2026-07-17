@@ -95,4 +95,68 @@ describe('simulateUsage (stub cache simulation)', () => {
 
     expect(seen.size).toBe(0)
   })
+
+  function msg(role: 'user' | 'assistant', text: string, withBreakpoint = false): unknown {
+    return {
+      role,
+      content: [{ type: 'text', text, ...(withBreakpoint ? { cache_control: { type: 'ephemeral' } } : {}) }],
+    }
+  }
+
+  it('growing conversation: an earlier shorter committed message-chain is creditable as a real prefix of a later, longer request', () => {
+    const tools = [toolWithBreakpoint()]
+    const system: unknown[] = []
+
+    // Turn 2: [u1, a1(breakpoint), u2] — breakpoint on the last-stable message (a1),
+    // matching placeBreakpoints' "last-stable-message boundary" convention.
+    const turn2Body = JSON.stringify({
+      tools,
+      system,
+      messages: [msg('user', 'u1'), msg('assistant', 'a1', true), msg('user', 'u2')],
+    })
+    const seen = new Set<string>()
+    simulateUsage(turn2Body, seen, true) // commit turn 2's rolling chain (base+u1+a1)
+
+    // Turn 3: same u1/a1 prefix, two more turns appended, breakpoint moved to a2.
+    const turn3Body = JSON.stringify({
+      tools,
+      system,
+      messages: [
+        msg('user', 'u1'),
+        msg('assistant', 'a1'),
+        msg('user', 'u2'),
+        msg('assistant', 'a2', true),
+        msg('user', 'u3'),
+      ],
+    })
+
+    const usage = simulateUsage(turn3Body, seen, false)
+
+    expect(usage.cache_read_input_tokens).toBeGreaterThan(0)
+    expect(usage.cache_creation_input_tokens).toBeGreaterThan(0)
+
+    // The read credit matches turn 2's exact committed chain length (base+u1+a1) —
+    // proving the shorter, earlier turn's commit is discoverable as a genuine
+    // prefix of turn 3's longer request, not re-billed as a fresh write.
+    const turn2Segments = collectSegments(turn2Body)
+    const turn2LastSegment = turn2Segments[turn2Segments.length - 1]!
+    expect(usage.cache_read_input_tokens).toBe(Math.ceil(turn2LastSegment.length / TOKEN_BYTE_RATIO))
+
+    // And the creation charge is only the incremental tail (u2+a2 newly added to
+    // the chain), not the whole turn-3 prefix re-billed from scratch.
+    const turn3Segments = collectSegments(turn3Body)
+    const turn3LastSegment = turn3Segments[turn3Segments.length - 1]!
+    expect(usage.cache_creation_input_tokens).toBe(
+      Math.ceil((turn3LastSegment.length - turn2LastSegment.length) / TOKEN_BYTE_RATIO),
+    )
+  })
+
+  it('a request with no message breakpoint (fewer than 2 messages) gets no message segment at all', () => {
+    const tools = [toolWithBreakpoint()]
+    const turn1Body = JSON.stringify({ tools, system: [], messages: [msg('user', 'u1')] })
+
+    const segments = collectSegments(turn1Body)
+
+    expect(segments).toHaveLength(1) // the tools segment only — no message-chain segment
+  })
 })

@@ -74,11 +74,31 @@ function templatedSystem(system: SystemBlock[], params: VolatileParams): SystemB
   }))
 }
 
-function templatedTools(tools: ToolDefinition[], params: VolatileParams): ToolDefinition[] {
-  return tools.map((tool) => ({
-    ...tool,
-    description: tool.description?.replace(FIXTURE_SESSION_URL, params.sessionUrl),
-  }))
+/**
+ * Deterministic per-instance key-order shuffle: sorts an object's own keys by
+ * the hash of `${seed}:${key}` rather than insertion order. Mimics the real
+ * problem F1 canonicalization fixes — different client libraries (or
+ * different runs of the same library) serializing the same tool definition
+ * with different JSON key order. Seeded only by instanceIndex + tool name,
+ * never by turn, so jitter varies across instances but stays identical
+ * across every turn of the same instance (verified by
+ * session-turns.test.ts's "shares identical volatile bytes across every
+ * turn" invariant, which this must not break).
+ */
+function jitterKeyOrder<T extends Record<string, unknown>>(obj: T, seed: string): T {
+  const keys = Object.keys(obj).sort((a, b) => sha256Hex(`${seed}:${a}`).localeCompare(sha256Hex(`${seed}:${b}`)))
+  const jittered: Record<string, unknown> = {}
+  for (const key of keys) jittered[key] = obj[key]
+  return jittered as T
+}
+
+function templatedTools(tools: ToolDefinition[], params: VolatileParams, instanceIndex: number): ToolDefinition[] {
+  return tools.map((tool) =>
+    jitterKeyOrder(
+      { ...tool, description: tool.description?.replace(FIXTURE_SESSION_URL, params.sessionUrl) },
+      `synthetic-instance-${instanceIndex}-tool-${tool.name}`,
+    ),
+  )
 }
 
 /** Deterministic ~200-280 char coding-task message text — identical across every instance for a given (role, turn). */
@@ -111,16 +131,18 @@ function buildMessagesUpTo(k: number): MessageParam[] {
 /**
  * Adapts `test/fixtures/claude-code-session.json` into a sequence of `turns`
  * full request bodies (one per turn k = 1..turns), each containing messages
- * `[u1,a1,...,u_k]` as text-block arrays. The two system blocks and two
- * tools carry `params`' volatile spans templated in place of the fixture's
- * hardcoded ones, so every turn of a given instance shares the same
- * volatile bytes (mimicking a real Claude Code session) while every other
- * byte matches every other instance exactly.
+ * `[u1,a1,...,u_k]` as text-block arrays. The two system blocks carry
+ * `params`' volatile spans templated in place of the fixture's hardcoded
+ * ones, so every turn of a given instance shares the same volatile bytes
+ * (mimicking a real Claude Code session). Tool definitions additionally get
+ * a per-instance key-order jitter (see `jitterKeyOrder`) — deliberately
+ * non-identical raw bytes across instances, so F1 canonicalization has a
+ * real effect to test instead of a no-op.
  */
-export function buildSessionTurns(params: VolatileParams, turns = 6): AnthropicRequestLike[] {
+export function buildSessionTurns(instanceIndex: number, params: VolatileParams, turns = 6): AnthropicRequestLike[] {
   const base = readFixtureFile()
   const system = templatedSystem((base.system ?? []) as SystemBlock[], params)
-  const tools = templatedTools(base.tools ?? [], params)
+  const tools = templatedTools(base.tools ?? [], params, instanceIndex)
 
   const requests: AnthropicRequestLike[] = []
   for (let k = 1; k <= turns; k++) {

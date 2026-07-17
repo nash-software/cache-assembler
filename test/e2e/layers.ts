@@ -31,18 +31,18 @@ export const LAYERS: ReadonlyArray<LayerDefinition> = [
   },
   {
     id: 'L1',
-    label: 'L1 — F1: canonicalize only, deterministic key ordering',
+    label: 'L1 — F2 naive: breakpoints placed over jittered (non-canonical) tool key order',
     proxy: true,
     config: {
-      canonicalize: { enabled: true },
-      breakpoints: { enabled: false },
+      canonicalize: { enabled: false },
+      breakpoints: { enabled: true },
       deferral: { enabled: false },
       barrier: { enabled: false },
     },
   },
   {
     id: 'L2',
-    label: 'L2 — F1+F2: canonicalize + breakpoints (this is what actually turns caching on)',
+    label: 'L2 — F1+F2: canonicalize + breakpoints (isolates F1’s real contribution over L1)',
     proxy: true,
     config: {
       canonicalize: { enabled: true },

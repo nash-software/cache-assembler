@@ -10,7 +10,7 @@ describe('LAYERS matrix (resolved config, not raw literals)', () => {
   // on defaults" invariant documented in layers.ts.
   it.each<[LayerId, boolean, boolean, boolean, boolean]>([
     // id,   canonicalize, breakpoints, deferral, barrier
-    ['L1', true, false, false, false],
+    ['L1', false, true, false, false],
     ['L2', true, true, false, false],
     ['L3', true, true, false, true],
     ['L4', true, true, true, true],

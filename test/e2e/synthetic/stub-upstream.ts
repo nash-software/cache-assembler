@@ -46,13 +46,50 @@ function messageHasCacheControl(message: MessageParam | undefined): boolean {
 }
 
 /**
+ * Strips `cache_control` from a message's content blocks before it feeds the
+ * rolling hash. `cache_control` is wire-level metadata telling the API where
+ * to place a boundary — it isn't part of the tokenized content itself, and
+ * the placement policy moves it to a new message every turn (the previous
+ * turn's breakpoint message loses the marker). Without stripping it, the
+ * SAME message text would hash differently depending on whether it happened
+ * to be carrying the breakpoint that particular turn, breaking prefix
+ * matching for no content-level reason.
+ */
+function stripMessageCacheControl(message: MessageParam): MessageParam {
+  if (!Array.isArray(message.content)) return message
+  return {
+    ...message,
+    content: (message.content as ContentBlock[]).map(({ cache_control: _cacheControl, ...rest }) => rest),
+  }
+}
+
+/** Index of the first message carrying a `cache_control` breakpoint, if any. */
+function messageBreakpointIndex(messages: MessageParam[]): number | undefined {
+  for (let i = 0; i < messages.length; i++) {
+    if (messageHasCacheControl(messages[i])) return i
+  }
+  return undefined
+}
+
+/**
  * Collects one segment per existing `cache_control` breakpoint, in prefix
  * order (tools ascending, then system ascending, then messages ascending) —
  * mirroring real Anthropic cache semantics where only `cache_control`-marked
- * boundaries are ever cacheable. Each segment's hash is computed over the
- * exact JSON text of the prefix slice up to and including that breakpoint,
- * so two requests only share a segment hash when that literal prefix slice
- * is byte-identical.
+ * boundaries are ever cacheable. Tool and system segments are hashed as
+ * closed JSON blobs (correct there: neither grows across turns, so exact
+ * equality is the right test). The message boundary is different: it grows
+ * every turn, and a closed-JSON hash of `{tools, system, messages: slice}`
+ * can never match an earlier, shorter slice — the closing brackets land at
+ * different positions for different array lengths, so no two different-
+ * length slices can ever be byte-prefixes of one another that way. Instead,
+ * the message boundary is hashed as a rolling chain over FLAT STRING
+ * CONCATENATION (`rollingText += JSON.stringify(messages[i])`), which *is*
+ * genuinely prefix-stable — one segment is pushed per message index up to
+ * the breakpoint, so an earlier turn's shorter committed chain is
+ * discoverable as a real prefix of a later turn's longer one. This is what
+ * lets a growing conversation get incremental cache credit (only the new
+ * tail billed as `cache_creation_input_tokens`) instead of re-paying the
+ * write premium on the entire prefix every turn.
  */
 export function collectSegments(rawBody: string): Segment[] {
   const { tools, system, messages } = parseBody(rawBody)
@@ -70,10 +107,13 @@ export function collectSegments(rawBody: string): Segment[] {
     segments.push({ hash: sha256Hex(text), length: text.length })
   }
 
-  for (let i = 0; i < messages.length; i++) {
-    if (!messageHasCacheControl(messages[i])) continue
-    const text = JSON.stringify({ tools, system, messages: messages.slice(0, i + 1) })
-    segments.push({ hash: sha256Hex(text), length: text.length })
+  const breakpointIndex = messageBreakpointIndex(messages)
+  if (breakpointIndex !== undefined) {
+    let rollingText = JSON.stringify({ tools, system })
+    for (let i = 0; i <= breakpointIndex; i++) {
+      rollingText += JSON.stringify(stripMessageCacheControl(messages[i]!))
+      segments.push({ hash: sha256Hex(rollingText), length: rollingText.length })
+    }
   }
 
   return segments

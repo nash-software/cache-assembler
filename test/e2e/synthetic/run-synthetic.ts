@@ -143,7 +143,7 @@ async function runLayer(layer: LayerDefinition, instances: number, turnsCount: n
   let failures = 0
   for (let instanceIndex = 0; instanceIndex < instances; instanceIndex++) {
     const params = defaultVolatileParams(instanceIndex)
-    const turns = buildSessionTurns(params, turnsCount)
+    const turns = buildSessionTurns(instanceIndex, params, turnsCount)
     for (const turnBody of turns) {
       const rawBody = JSON.stringify(turnBody)
       const prefixHash = sha256Hex(rawBody)
@@ -218,7 +218,7 @@ async function runConcurrentBatch(rawBody: string, concurrency: number, config: 
  */
 async function runConcurrencyScenario(concurrency: number): Promise<ConcurrencyResult> {
   const fixedParams = defaultVolatileParams(0)
-  const [turn1] = buildSessionTurns(fixedParams, 1)
+  const [turn1] = buildSessionTurns(0, fixedParams, 1)
   const rawBody = JSON.stringify(turn1)
 
   const barrierOnWrites = await runConcurrentBatch(rawBody, concurrency, getLayer('L3').config)
