@@ -108,4 +108,33 @@ describe('placeBreakpoints', () => {
     placed.slice(0, -1).forEach((p) => expect(p.ttl).toBe('1h'))
     expect(placed.at(-1)?.ttl).toBe('5m')
   })
+
+  it('forces every new placement to 5m when an existing breakpoint has no ttl (defaults to 5m server-side), never emitting an invalid 1h-after-5m sequence', () => {
+    // Reproduces the real API 400: "a ttl='1h' cache_control block must not
+    // come after a ttl='5m' cache_control block" — a client (e.g. Claude
+    // Code) sets a breakpoint on the last tool with no explicit ttl, which
+    // the API defaults to 5m. Any new breakpoint placed after it must not be 1h.
+    const req: AnthropicRequestLike = {
+      messages: [textMessage('user', 'first'), textMessage('assistant', 'second'), textMessage('user', 'third')],
+      system: [{ type: 'text', text: 'sys' }],
+      tools: [tool('a', { type: 'ephemeral' })],
+    }
+    const { placed } = placeBreakpoints(req, resolveConfig({}))
+    expect(placed.length).toBeGreaterThan(0)
+    placed.forEach((p) => expect(p.ttl).toBe('5m'))
+  })
+
+  it('preserves normal 1h/5m tiering when the only existing breakpoint is explicitly ttl=1h', () => {
+    // An existing 1h breakpoint does not force anything — only a lower-tier
+    // (5m or no-ttl) existing breakpoint does.
+    const req: AnthropicRequestLike = {
+      messages: [textMessage('user', 'first'), textMessage('assistant', 'second'), textMessage('user', 'third')],
+      system: [{ type: 'text', text: 'sys' }],
+      tools: [tool('a', { type: 'ephemeral', ttl: '1h' })],
+    }
+    const { placed } = placeBreakpoints(req, resolveConfig({}))
+    expect(placed.length).toBeGreaterThan(0)
+    placed.slice(0, -1).forEach((p) => expect(p.ttl).toBe('1h'))
+    expect(placed.at(-1)?.ttl).toBe('5m')
+  })
 })

@@ -1,4 +1,4 @@
-import type { AnthropicRequestLike, BreakpointPlacement, ContentBlock, SystemBlock } from './types.js'
+import type { AnthropicRequestLike, BreakpointPlacement, CacheControl, ContentBlock, SystemBlock } from './types.js'
 import type { CacheAssemblerConfig, ResolvedConfig } from './config.js'
 
 const TTL_INTERMEDIATE = '1h'
@@ -8,6 +8,29 @@ function normalizeSystem(system: AnthropicRequestLike['system']): SystemBlock[] 
   if (system === undefined) return []
   if (typeof system === 'string') return [{ type: 'text', text: system }]
   return system
+}
+
+function isLowerTierTtl(cacheControl: CacheControl | undefined): boolean {
+  return cacheControl !== undefined && cacheControl.ttl !== '1h'
+}
+
+/**
+ * True if any EXISTING (client-set) breakpoint anywhere in the request is at
+ * the lower tier ('5m', or no ttl — which the API defaults to 5m). The
+ * Anthropic API requires TTLs non-increasing in priority across the full
+ * tools -> system -> messages sequence, and existing breakpoints can never be
+ * modified, so once one of them is at the lower tier, every breakpoint placed
+ * anywhere in the request (existing or new) must also be at the lower tier.
+ */
+function hasExistingLowerTierBreakpoint(req: AnthropicRequestLike, system: SystemBlock[]): boolean {
+  if ((req.tools ?? []).some((t) => isLowerTierTtl(t.cache_control))) return true
+  if (system.some((b) => isLowerTierTtl(b.cache_control))) return true
+  for (const message of req.messages) {
+    if (typeof message.content === 'string') continue
+    const blocks = message.content as ContentBlock[]
+    if (blocks.some((b) => isLowerTierTtl(b.cache_control as CacheControl | undefined))) return true
+  }
+  return false
 }
 
 function countExisting(req: AnthropicRequestLike, system: SystemBlock[]): number {
@@ -38,7 +61,16 @@ type Candidate = { location: BreakpointPlacement['location']; index: number; app
  * last-stable-message boundary (final content block of the last message
  * EXCLUDING the newest message). Never modifies or removes an existing
  * client-set breakpoint; existing ones count against the shared API budget.
- * TTL tiering: '1h' for every placement except the last, which gets '5m'.
+ * TTL tiering: '1h' for every placement except the last, which gets '5m' —
+ * UNLESS an existing (client-set) breakpoint anywhere in the request is
+ * already at the lower tier ('5m' or no ttl), in which case every new
+ * placement is forced to '5m'. The Anthropic API requires TTLs
+ * non-increasing in priority across tools -> system -> messages, and an
+ * existing breakpoint can never be modified to fix an ordering violation —
+ * only new placements can adapt. This is conservative (it forces '5m' even
+ * for new placements that would sit before the conflicting existing one),
+ * trading some cache longevity for a guarantee the assembled request is
+ * always valid.
  */
 export function placeBreakpoints(
   req: AnthropicRequestLike,
@@ -48,6 +80,7 @@ export function placeBreakpoints(
   const system = normalizeSystem(req.system)
   const existing = countExistingBreakpoints(req)
   const freeSlots = Math.max(0, maxSlots - existing)
+  const forceLowerTier = hasExistingLowerTierBreakpoint(req, system)
 
   const tools = req.tools ? [...req.tools] : undefined
   const messages = req.messages.map((m) => ({
@@ -108,7 +141,7 @@ export function placeBreakpoints(
 
   const toPlace = candidates.slice(0, freeSlots)
   const placed: BreakpointPlacement[] = toPlace.map((c, i) => {
-    const ttl = i === toPlace.length - 1 ? TTL_FINAL : TTL_INTERMEDIATE
+    const ttl = forceLowerTier || i === toPlace.length - 1 ? TTL_FINAL : TTL_INTERMEDIATE
     c.apply(ttl)
     return { location: c.location, index: c.index, ttl }
   })
