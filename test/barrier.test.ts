@@ -149,13 +149,18 @@ describe('WriteBarrier timeout and error paths (F4 fail-open)', () => {
     expect((await followerPromise).role).toBe('follower')
   })
 
-  it('does not fire the timeout once firstByte() has already released the hash', async () => {
+  it('replaces the hold-timeout with an eviction timeout once firstByte() fires, rather than double-scheduling', async () => {
     const scheduler = createFakeScheduler()
     const barrier = new WriteBarrier({ scheduler })
 
     await barrier.enter('hash-ok')
     barrier.firstByte('hash-ok')
 
+    // The original hold-timeout is cleared; a single new eviction timeout
+    // takes its place (see audit-fix-barrier-eviction.test.ts) — never both
+    // at once, and firing it doesn't crash or re-release followers.
+    expect(scheduler.isScheduled()).toBe(true)
+    expect(() => scheduler.fire()).not.toThrow()
     expect(scheduler.isScheduled()).toBe(false)
   })
 })

@@ -12,10 +12,18 @@ export interface WriteBarrierScheduler {
 
 export interface WriteBarrierOptions {
   holdTimeoutMs?: number
+  /** How long a warm entry stays warm before eviction. Defaults to the
+   * shorter (5-minute) real Anthropic cache TTL — a conservative lower
+   * bound, since the barrier isn't told which TTL tier the actual
+   * breakpoint used. Evicting too early only costs an extra write cycle;
+   * evicting too late would leave future callers waiting on a cache entry
+   * that's already gone. */
+  warmTtlMs?: number
   scheduler?: WriteBarrierScheduler
 }
 
 const DEFAULT_HOLD_TIMEOUT_MS = 15000
+const DEFAULT_WARM_TTL_MS = 5 * 60 * 1000
 
 const DEFAULT_SCHEDULER: WriteBarrierScheduler = {
   now: () => Date.now(),
@@ -42,10 +50,12 @@ interface BarrierEntry {
 export class WriteBarrier {
   private readonly entries = new Map<string, BarrierEntry>()
   private readonly holdTimeoutMs: number
+  private readonly warmTtlMs: number
   private readonly scheduler: WriteBarrierScheduler
 
   constructor(options: WriteBarrierOptions = {}) {
     this.holdTimeoutMs = options.holdTimeoutMs ?? DEFAULT_HOLD_TIMEOUT_MS
+    this.warmTtlMs = options.warmTtlMs ?? DEFAULT_WARM_TTL_MS
     this.scheduler = options.scheduler ?? DEFAULT_SCHEDULER
   }
 
@@ -74,6 +84,12 @@ export class WriteBarrier {
     this.clearTimeout(entry)
     entry.warm = true
     this.releaseFollowers(entry)
+    // Without this, a warm entry lives in `entries` forever: unbounded
+    // memory growth (one entry per unique prefix hash, ever), and once the
+    // real Anthropic cache TTL expires server-side, every future caller for
+    // this hash would still be told 'follower' for a write that will never
+    // land. Evict on the same schedule as the real cache entry's lifetime.
+    entry.timeoutHandle = this.scheduler.setTimeout(() => this.entries.delete(hash), this.warmTtlMs)
   }
 
   /**
