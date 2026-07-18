@@ -65,22 +65,54 @@ interface ParsedCliValues {
   version?: boolean
 }
 
+class CliArgError extends Error {}
+
 function parseCliArgs(argv: string[]): ParsedCliValues {
-  const { values } = parseArgs({
-    args: argv,
-    options: {
-      port: { type: 'string' },
-      host: { type: 'string' },
-      upstream: { type: 'string' },
-      preset: { type: 'string' },
-      defer: { type: 'boolean', default: false },
-      'dry-run': { type: 'boolean', default: false },
-      'trace-log': { type: 'string' },
-      help: { type: 'boolean', default: false },
-      version: { type: 'boolean', default: false },
-    },
-  })
-  return values
+  try {
+    const { values } = parseArgs({
+      args: argv,
+      options: {
+        port: { type: 'string' },
+        host: { type: 'string' },
+        upstream: { type: 'string' },
+        preset: { type: 'string' },
+        defer: { type: 'boolean', default: false },
+        'dry-run': { type: 'boolean', default: false },
+        'trace-log': { type: 'string' },
+        help: { type: 'boolean', default: false },
+        version: { type: 'boolean', default: false },
+      },
+    })
+    return values
+  } catch (err) {
+    // parseArgs is strict by default — an unknown flag throws rather than
+    // returning a result. Re-throw as a typed error so run() can turn it
+    // into a clean usage message instead of an uncaught stack trace.
+    throw new CliArgError(err instanceof Error ? err.message : String(err))
+  }
+}
+
+const MIN_PORT = 0
+const MAX_PORT = 65535
+
+/** Returns a validated port number, or an error message if --port is malformed. */
+function parsePort(rawPort: string | undefined): { port: number } | { error: string } {
+  if (rawPort === undefined) return { port: DEFAULT_PORT }
+  const parsed = Number.parseInt(rawPort, 10)
+  if (!Number.isInteger(parsed) || String(parsed) !== rawPort.trim() || parsed < MIN_PORT || parsed > MAX_PORT) {
+    return { error: `--port must be an integer between ${MIN_PORT} and ${MAX_PORT}, got "${rawPort}"` }
+  }
+  return { port: parsed }
+}
+
+/** Returns null if the upstream URL is well-formed, or an error message. */
+function validateUpstream(upstream: string): string | null {
+  try {
+    new URL(upstream)
+    return null
+  } catch {
+    return `--upstream is not a valid URL: "${upstream}"`
+  }
 }
 
 function buildConfig(values: ParsedCliValues): CacheAssemblerConfig {
@@ -98,7 +130,14 @@ function buildConfig(values: ParsedCliValues): CacheAssemblerConfig {
  * returns undefined (process stays alive on the open server socket).
  */
 export function run(argv: string[], io: CliIO = DEFAULT_IO): number | undefined {
-  const values = parseCliArgs(argv)
+  let values: ParsedCliValues
+  try {
+    values = parseCliArgs(argv)
+  } catch (err) {
+    const message = err instanceof CliArgError ? err.message : err instanceof Error ? err.message : String(err)
+    io.stderr(`Error: ${message}\n\n${HELP_TEXT}`)
+    return 1
+  }
 
   if (values.help) {
     io.stdout(HELP_TEXT)
@@ -112,8 +151,18 @@ export function run(argv: string[], io: CliIO = DEFAULT_IO): number | undefined 
     io.stderr(`Error: --upstream is required\n\n${HELP_TEXT}`)
     return 1
   }
+  const upstreamError = validateUpstream(values.upstream)
+  if (upstreamError !== null) {
+    io.stderr(`Error: ${upstreamError}\n\n${HELP_TEXT}`)
+    return 1
+  }
 
-  const port = values.port ? Number.parseInt(values.port, 10) : DEFAULT_PORT
+  const portResult = parsePort(values.port)
+  if ('error' in portResult) {
+    io.stderr(`Error: ${portResult.error}\n\n${HELP_TEXT}`)
+    return 1
+  }
+
   // Default localhost-only: binding 0.0.0.0 by default would turn this into
   // an unauthenticated open relay (forwards a raw upstream API key) plus a
   // /stats endpoint leaking prior requests' prefix bytes to anyone on the
@@ -121,8 +170,12 @@ export function run(argv: string[], io: CliIO = DEFAULT_IO): number | undefined 
   const host = values.host ?? DEFAULT_HOST
   const config = buildConfig(values)
   const server = createProxyServer({ upstream: values.upstream, config, traceLogPath: values['trace-log'] })
-  server.listen(port, host, () => {
-    io.stdout(`${PACKAGE_NAME} listening on http://${host}:${port}\n`)
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    io.stderr(`Error: failed to start server on ${host}:${portResult.port}: ${err.message}\n`)
+    process.exitCode = 1
+  })
+  server.listen(portResult.port, host, () => {
+    io.stdout(`${PACKAGE_NAME} listening on http://${host}:${portResult.port}\n`)
   })
   return undefined
 }
