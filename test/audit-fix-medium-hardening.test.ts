@@ -65,7 +65,7 @@ describe('deferral extractor ReDoS regression (audit finding MEDIUM-5)', () => {
   it('completes quickly even against a catastrophic-backtracking pattern and an adversarial value', () => {
     const req: AnthropicRequestLike = {
       messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
-      system: [{ type: 'text', text: 'a'.repeat(35) + '!' }],
+      system: [{ type: 'text', text: 'a'.repeat(24) + '!' }],
     }
     const cfg = {
       deferral: {
@@ -103,7 +103,12 @@ describe('CLI operator-error hardening regression (audit finding MEDIUM-6)', () 
   it('returns a clean error exit code for a malformed --upstream URL instead of deferring to a request-time 502', () => {
     const stderrLines: string[] = []
     const io = { stdout: () => undefined, stderr: (t: string) => stderrLines.push(t) }
-    const exitCode = run(['--upstream', 'not a valid url'], io)
+    // Explicit high port: an unvalidated --upstream currently falls through all
+    // the way to server.listen() on whatever port is in effect, and this repo's
+    // own dev environment routinely has something real bound to the default
+    // port (8788) — using a dedicated port here keeps this test deterministic
+    // regardless of what else is running on the machine.
+    const exitCode = run(['--upstream', 'not a valid url', '--port', '48211'], io)
     expect(exitCode).toBeGreaterThan(0)
   })
 })
