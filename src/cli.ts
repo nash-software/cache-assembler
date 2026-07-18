@@ -21,8 +21,8 @@ Options:
   --host <addr>    Address to bind (default: ${DEFAULT_HOST}, localhost-only).
                    Pass an explicit address (e.g. 0.0.0.0) to opt into LAN
                    exposure — the proxy forwards a raw upstream API key and
-                   /stats leaks prior request prefix bytes, so this is
-                   opt-in, not the default.
+                   /stats exposes aggregate token/cost counters to anyone who
+                   can reach the port, so this is opt-in, not the default.
   --upstream <url> Upstream URL to forward assembled requests to (required)
   --preset <name>  Named preset (e.g. "claude-code") supplying F3 deferral extractors
   --defer          Enable F3 volatile-byte deferral (active mode)
@@ -165,7 +165,7 @@ export function run(argv: string[], io: CliIO = DEFAULT_IO): number | undefined 
 
   // Default localhost-only: binding 0.0.0.0 by default would turn this into
   // an unauthenticated open relay (forwards a raw upstream API key) plus a
-  // /stats endpoint leaking prior requests' prefix bytes to anyone on the
+  // /stats endpoint exposing aggregate token/cost counters to anyone on the
   // network. LAN/network exposure is opt-in via an explicit --host.
   const host = values.host ?? DEFAULT_HOST
   const config = buildConfig(values)

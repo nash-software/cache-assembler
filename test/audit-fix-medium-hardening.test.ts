@@ -145,3 +145,85 @@ describe('upstream buffering/timeout hardening regression (audit finding MEDIUM-
     expect(upstreamRequestDestroyed).toBe(true)
   })
 })
+
+// --- Finding 8: /stats claimed to leak prior request prefix bytes, but the
+// standalone proxy never wires divergence tracking, so the claim was stale ---
+describe('/stats content regression (audit finding LOW-8)', () => {
+  it('never includes prior request prefix content, since the standalone proxy does not populate divergence tracking', async () => {
+    const upstream = await startFakeUpstream((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ usage: { input_tokens: 10 } }))
+    })
+    const server = createProxyServer({ upstream: upstream.url, config: { barrier: { enabled: false } } })
+    servers.push(server)
+    const port = await listen(server)
+
+    await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'x',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'sensitive prior prefix content' }] }],
+      }),
+    })
+
+    const statsRes = await fetch(`http://127.0.0.1:${port}/stats`)
+    const stats = (await statsRes.json()) as { divergences: unknown[] }
+
+    expect(stats.divergences).toEqual([])
+  })
+})
+
+// --- Finding 9: barrier keyed on prefix hash alone, not tenant-aware ---
+describe('barrier tenant-isolation regression (audit finding LOW-9)', () => {
+  it('does not make a second caller a follower of a different caller with an identical prefix hash', async () => {
+    let requestsInFlight = 0
+    let releaseUpstream: (() => void) | undefined
+    const bothArrived = new Promise<void>((resolve) => {
+      releaseUpstream = () => resolve()
+    })
+    const upstream = await startFakeUpstream((_req, res) => {
+      requestsInFlight += 1
+      if (requestsInFlight === 2) releaseUpstream?.()
+      void bothArrived.then(() => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ usage: { input_tokens: 10 } }))
+      })
+    })
+
+    const dir = mkdtempSync(join(tmpdir(), 'cache-assembler-audit-'))
+    const traceLogPath = join(dir, 'trace.jsonl')
+    const server = createProxyServer({
+      upstream: upstream.url,
+      config: { barrier: { enabled: true } },
+      traceLogPath,
+    })
+    servers.push(server)
+    const port = await listen(server)
+
+    const body = JSON.stringify({
+      model: 'x',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'identical prefix, different caller' }] }],
+    })
+
+    await Promise.all([
+      fetch(`http://127.0.0.1:${port}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer caller-a' },
+        body,
+      }),
+      fetch(`http://127.0.0.1:${port}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer caller-b' },
+        body,
+      }),
+    ])
+
+    const lines = readFileSync(traceLogPath, 'utf8').trim().split('\n')
+    const roles = lines.map((line) => (JSON.parse(line) as { barrierRole?: string }).barrierRole)
+
+    expect(roles.sort()).toEqual(['leader', 'leader'])
+
+    rmSync(dir, { recursive: true, force: true })
+  })
+})

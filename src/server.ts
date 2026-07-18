@@ -9,7 +9,7 @@ import {
 } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { appendFileSync } from 'node:fs'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { AnthropicRequestLike, AssembleReport, AssemblerState, Usage } from './types.js'
 import { resolveConfig, type CacheAssemblerConfig } from './config.js'
 import { assemble } from './assemble.js'
@@ -135,6 +135,18 @@ function safeHeaders(headers: IncomingHttpHeaders): Record<string, string> {
     out[key] = REDACTED_HEADER_KEYS.has(key.toLowerCase()) ? '[redacted]' : Array.isArray(value) ? value.join(', ') : value
   }
   return out
+}
+
+/**
+ * Fingerprints the calling tenant from its auth header so the write barrier
+ * (below) doesn't fan out a follower to wait on a leader it can never
+ * observe the cache write of. Hashed rather than stored raw: the barrier key
+ * only needs to distinguish callers, never needs to recover the credential.
+ */
+function callerFingerprint(headers: IncomingHttpHeaders): string {
+  const credential = headers['authorization'] ?? headers['x-api-key'] ?? ''
+  const raw = Array.isArray(credential) ? credential.join(',') : credential
+  return createHash('sha256').update(raw).digest('hex').slice(0, 16)
 }
 
 interface TraceEntry {
@@ -298,10 +310,15 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       if (trace !== undefined) trace.assembleError = err instanceof Error ? err.message : String(err)
     }
 
+    // Tenant-scoped: two different callers hashing to the same prefix must
+    // not fan out as leader/follower of each other — a follower can never
+    // observe a cache write made under a leader's own credential.
+    const barrierKey = prefixHash === undefined ? undefined : `${prefixHash}:${callerFingerprint(req.headers)}`
+
     let role: WriteBarrierRole = 'leader'
-    if (cfg.barrier.enabled && prefixHash !== undefined) {
+    if (cfg.barrier.enabled && barrierKey !== undefined) {
       try {
-        role = (await barrier.enter(prefixHash)).role
+        role = (await barrier.enter(barrierKey)).role
       } catch (err) {
         console.error(`${LOG_PREFIX} barrier enter failed, proceeding without coordination`, err)
       }
@@ -318,8 +335,8 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       const chunks: Buffer[] = []
       let firstByteSignaled = false
       for await (const chunk of upstreamRes.body as AsyncIterable<Buffer>) {
-        if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && prefixHash !== undefined) {
-          barrier.firstByte(prefixHash)
+        if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && barrierKey !== undefined) {
+          barrier.firstByte(barrierKey)
           firstByteSignaled = true
         }
         // Only accumulate the full body when something will actually read it
@@ -331,8 +348,8 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       }
       res.end()
 
-      if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && prefixHash !== undefined) {
-        barrier.firstByte(prefixHash)
+      if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && barrierKey !== undefined) {
+        barrier.firstByte(barrierKey)
       }
 
       if (needsUsageBuffer && prefixHash !== undefined) {
@@ -347,7 +364,7 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       }
       emitTrace()
     } catch (err) {
-      if (cfg.barrier.enabled && prefixHash !== undefined) barrier.fail(prefixHash)
+      if (cfg.barrier.enabled && barrierKey !== undefined) barrier.fail(barrierKey)
       console.error(`${LOG_PREFIX} upstream request failed`, err)
       if (trace !== undefined) trace.error = err instanceof Error ? err.message : String(err)
       emitTrace()
