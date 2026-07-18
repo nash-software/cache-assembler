@@ -30,6 +30,8 @@ export interface ProxyServerOptions {
    * tracing entirely with zero behavior change.
    */
   traceLogPath?: string
+  /** Max time to wait on the upstream request/response before aborting. Default 120s. */
+  upstreamTimeoutMs?: number
 }
 
 const MESSAGES_PATH = '/v1/messages'
@@ -39,6 +41,7 @@ const STATS_PATH = '/stats'
 const LOG_PREFIX = '[cache-assembler]'
 const EXCLUDED_FORWARD_HEADERS = new Set(['host', 'content-length', 'connection', 'accept-encoding'])
 const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 120_000
 
 function isProxiedPath(pathname: string): boolean {
   return pathname === MESSAGES_PATH || pathname.startsWith(HOP_PATH_PREFIX)
@@ -188,6 +191,7 @@ function forwardToUpstream(
   pathname: string,
   originalHeaders: IncomingHttpHeaders,
   body: string,
+  signal: AbortSignal,
 ): Promise<UpstreamResponse> {
   const target = new URL(pathname, upstream)
   const requestFn = target.protocol === 'https:' ? httpsRequest : httpRequest
@@ -196,7 +200,7 @@ function forwardToUpstream(
   return new Promise((resolve, reject) => {
     const outgoing = requestFn(
       target,
-      { method: 'POST', headers: buildForwardHeaders(originalHeaders, payload.length) },
+      { method: 'POST', headers: buildForwardHeaders(originalHeaders, payload.length), signal },
       (upstreamRes) => {
         resolve({ statusCode: upstreamRes.statusCode ?? 502, headers: upstreamRes.headers, body: upstreamRes })
       },
@@ -222,6 +226,27 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
 
   async function handleProxiedRequest(req: IncomingMessage, res: ServerResponse, pathname: string, forwardPath: string): Promise<void> {
     const startedAt = Date.now()
+
+    // Bounds the upstream call two ways: a hard timeout (a hung upstream must
+    // not hang the client forever), and client-abort cancellation (if the
+    // client goes away mid-request, the upstream request is destroyed rather
+    // than continuing to be paid for and buffered to completion).
+    //
+    // res's 'close' (not req's) is the correct signal here, checked against
+    // writableEnded: req.on('close', ...) fires as soon as the REQUEST BODY
+    // finishes being read — which happens almost immediately for a normal
+    // request, long before we're anywhere near done — so it produced a false
+    // "client disconnected" on every single request. res only closes once
+    // the underlying connection closes; writableEnded tells us whether that
+    // happened because we legitimately finished (true) or because the client
+    // actually went away first (false).
+    const upstreamAbort = new AbortController()
+    res.on('close', () => {
+      if (!res.writableEnded) upstreamAbort.abort()
+    })
+    const upstreamTimeoutMs = opts.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS
+    const upstreamSignal = AbortSignal.any([upstreamAbort.signal, AbortSignal.timeout(upstreamTimeoutMs)])
+
     const trace: TraceEntry | undefined =
       opts.traceLogPath === undefined
         ? undefined
@@ -283,8 +308,10 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
     }
     if (trace !== undefined) trace.barrierRole = cfg.barrier.enabled ? role : undefined
 
+    const needsUsageBuffer = cfg.telemetry.enabled && prefixHash !== undefined
+
     try {
-      const upstreamRes = await forwardToUpstream(opts.upstream, forwardPath, req.headers, outgoingBody)
+      const upstreamRes = await forwardToUpstream(opts.upstream, forwardPath, req.headers, outgoingBody, upstreamSignal)
       res.writeHead(upstreamRes.statusCode, upstreamRes.headers)
       if (trace !== undefined) trace.upstreamStatus = upstreamRes.statusCode
 
@@ -295,7 +322,11 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
           barrier.firstByte(prefixHash)
           firstByteSignaled = true
         }
-        chunks.push(chunk)
+        // Only accumulate the full body when something will actually read it
+        // back (usage extraction for telemetry) — otherwise every proxied
+        // response was fully buffered in memory for no reason, even with
+        // telemetry disabled.
+        if (needsUsageBuffer) chunks.push(chunk)
         res.write(chunk)
       }
       res.end()
@@ -304,7 +335,7 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
         barrier.firstByte(prefixHash)
       }
 
-      if (cfg.telemetry.enabled && prefixHash !== undefined) {
+      if (needsUsageBuffer && prefixHash !== undefined) {
         const usage = extractUsage(Buffer.concat(chunks).toString('utf8'))
         if (usage !== undefined) {
           telemetry.record({ prefixHash, usage })

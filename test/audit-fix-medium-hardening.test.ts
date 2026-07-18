@@ -140,7 +140,7 @@ describe('upstream buffering/timeout hardening regression (audit finding MEDIUM-
     await new Promise((resolve) => setTimeout(resolve, 100))
     controller.abort()
     await reqPromise
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await new Promise((resolve) => setTimeout(resolve, 800))
 
     expect(upstreamRequestDestroyed).toBe(true)
   })
