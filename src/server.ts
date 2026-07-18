@@ -117,7 +117,7 @@ interface UpstreamResponse {
   body: IncomingMessage
 }
 
-const REDACTED_HEADER_KEYS = new Set(['authorization', 'x-api-key', 'cookie', 'set-cookie'])
+const REDACTED_HEADER_KEYS = new Set(['authorization', 'proxy-authorization', 'x-api-key', 'cookie', 'set-cookie'])
 
 /**
  * Redacts known-sensitive headers by key but otherwise keeps everything —

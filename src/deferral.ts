@@ -3,14 +3,36 @@ import type { CacheAssemblerConfig, ResolvedConfig } from './config.js'
 import { resolveJsonPath, type PathAccessor } from './json-path.js'
 import { prefixHash } from './prefix-hash.js'
 import { canonicalizeRequest } from './canonicalize.js'
+import { isPotentiallyCatastrophicPattern } from './regex-safety.js'
 
 const RELOCATION_BLOCK_TYPE = 'text'
+
+// Operator-configured extractor patterns run against request content — a
+// badly-written pattern with catastrophic backtracking (e.g. `^(a+)+$`)
+// combined with an adversarial value could otherwise block the single-
+// threaded proxy event loop indefinitely. Bounding the tested length puts a
+// hard ceiling on worst-case regex time regardless of pattern quality, since
+// backtracking blowup scales with input length. Known limitation: a
+// volatile span located entirely past this cutoff in a single field won't
+// be found — acceptable for the realistic case (scratchpad paths, session
+// IDs) where the matched span sits near the front of the field.
+const MAX_EXTRACTOR_INPUT_LENGTH = 20_000
 
 function toAccessorList(resolved: PathAccessor | PathAccessor[]): PathAccessor[] {
   return Array.isArray(resolved) ? resolved : [resolved]
 }
 
-function compileMatcher(extractor: Extractor): RegExp {
+/**
+ * Returns null (skip this extractor) rather than a RegExp when the pattern
+ * matches a known catastrophic-backtracking shape — see regex-safety.ts.
+ * Fail-open, matching the rest of this module: a bad preset should not take
+ * down the whole request pipeline.
+ */
+function compileMatcher(extractor: Extractor): RegExp | null {
+  if (isPotentiallyCatastrophicPattern(extractor.pattern)) {
+    console.error(`[cache-assembler] deferral: extractor "${extractor.id}" skipped — pattern looks like it could cause catastrophic regex backtracking`)
+    return null
+  }
   return new RegExp(extractor.pattern, extractor.flags ?? '')
 }
 
@@ -20,12 +42,14 @@ function extractSpans(req: AnthropicRequestLike, extractors: Extractor[]): { req
 
   for (const extractor of extractors) {
     const matcher = compileMatcher(extractor)
+    if (matcher === null) continue
     const accessors = toAccessorList(resolveJsonPath(clone, extractor.path))
     for (const accessor of accessors) {
       if (!accessor.exists) continue
       const value = accessor.get()
       if (value === undefined) continue
-      const match = matcher.exec(value)
+      const boundedValue = value.length > MAX_EXTRACTOR_INPUT_LENGTH ? value.slice(0, MAX_EXTRACTOR_INPUT_LENGTH) : value
+      const match = matcher.exec(boundedValue)
       if (!match) continue
       moved.push({ id: extractor.id, path: accessor.path, text: match[0] })
       accessor.set(value.slice(0, match.index) + value.slice(match.index + match[0].length))

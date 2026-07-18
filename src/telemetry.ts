@@ -1,6 +1,7 @@
 import type { AnthropicRequestLike, AssembleReport, Extractor, Usage } from './types.js'
 import { canonicalizeRequest, canonicalStringify } from './canonicalize.js'
 import { resolveJsonPath, type PathAccessor } from './json-path.js'
+import { isPotentiallyCatastrophicPattern } from './regex-safety.js'
 
 export interface TelemetryEntry {
   prefixHash: string
@@ -144,6 +145,7 @@ function matchesExtractorPath(previous: string, next: string, extractors: Extrac
   if (!previousReq || !nextReq) return false
 
   for (const extractor of extractors) {
+    if (isPotentiallyCatastrophicPattern(extractor.pattern)) continue
     const matcher = new RegExp(extractor.pattern, extractor.flags ?? '')
     const previousAccessors = toAccessorList(resolveJsonPath(previousReq, extractor.path))
     const nextAccessors = toAccessorList(resolveJsonPath(nextReq, extractor.path))
