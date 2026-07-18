@@ -220,7 +220,7 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
   const state: AssemblerState = opts.state ?? { knownPrefixHashes: [] }
   const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES
 
-  async function handleProxiedRequest(req: IncomingMessage, res: ServerResponse, pathname: string): Promise<void> {
+  async function handleProxiedRequest(req: IncomingMessage, res: ServerResponse, pathname: string, forwardPath: string): Promise<void> {
     const startedAt = Date.now()
     const trace: TraceEntry | undefined =
       opts.traceLogPath === undefined
@@ -284,7 +284,7 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
     if (trace !== undefined) trace.barrierRole = cfg.barrier.enabled ? role : undefined
 
     try {
-      const upstreamRes = await forwardToUpstream(opts.upstream, pathname, req.headers, outgoingBody)
+      const upstreamRes = await forwardToUpstream(opts.upstream, forwardPath, req.headers, outgoingBody)
       res.writeHead(upstreamRes.statusCode, upstreamRes.headers)
       if (trace !== undefined) trace.upstreamStatus = upstreamRes.statusCode
 
@@ -341,7 +341,7 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       // resolves; a client abort mid-body rejects before that point, so this
       // outer .catch is the only thing standing between that and an
       // unhandled rejection crashing a long-running proxy process.
-      handleProxiedRequest(req, res, url.pathname).catch((err: unknown) => {
+      handleProxiedRequest(req, res, url.pathname, url.pathname + url.search).catch((err: unknown) => {
         console.error(`${LOG_PREFIX} request handling failed`, err)
         if (!res.headersSent) sendJson(res, 502, { error: 'request failed' })
         else res.end()
