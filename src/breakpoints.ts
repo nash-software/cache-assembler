@@ -7,7 +7,12 @@ const TTL_FINAL = '5m'
 function normalizeSystem(system: AnthropicRequestLike['system']): SystemBlock[] {
   if (system === undefined) return []
   if (typeof system === 'string') return [{ type: 'text', text: system }]
-  return system
+  // Copy, never the caller's own array — placeBreakpoints mutates entries of
+  // whatever this returns in place, and assemble() documents "never mutates
+  // req". Returning the original reference here silently corrupted the
+  // caller's own request object under default config (deferral off, which
+  // is the only path that doesn't already clone via structuredClone).
+  return [...system]
 }
 
 function countExisting(req: AnthropicRequestLike, system: SystemBlock[]): number {
