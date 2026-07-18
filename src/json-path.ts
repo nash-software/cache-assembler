@@ -38,21 +38,30 @@ function isIndexable(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object'
 }
 
+// Path segments only ever address plain request-body data (message/tool/system
+// fields), never JS object internals — blocking these outright means a
+// malformed or malicious path can't walk into (and, via set(), corrupt) a
+// shared prototype rather than merely failing to resolve.
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
+function segmentKey(seg: Segment | undefined): string | undefined {
+  const key = seg?.kind === 'field' ? seg.name : seg?.kind === 'index' ? String(seg.index) : undefined
+  return key !== undefined && DANGEROUS_KEYS.has(key) ? undefined : key
+}
+
 function buildAccessor(root: unknown, segments: Segment[], displayPath: string): PathAccessor {
   function walk(): { parent: Record<string, unknown>; key: string; exists: boolean } | undefined {
     let parent: unknown = root
     for (let i = 0; i < segments.length - 1; i++) {
-      const seg = segments[i]!
       if (!isIndexable(parent)) return undefined
-      const key = seg.kind === 'field' ? seg.name : seg.kind === 'index' ? String(seg.index) : undefined
+      const key = segmentKey(segments[i])
       if (key === undefined) return undefined
       parent = (parent as Record<string, unknown>)[key]
     }
     if (!isIndexable(parent)) return undefined
-    const last = segments[segments.length - 1]
-    const key = last?.kind === 'field' ? last.name : last?.kind === 'index' ? String(last.index) : undefined
+    const key = segmentKey(segments[segments.length - 1])
     if (key === undefined) return undefined
-    const exists = key in (parent as Record<string, unknown>)
+    const exists = Object.prototype.hasOwnProperty.call(parent, key)
     return { parent: parent as Record<string, unknown>, key, exists }
   }
 
@@ -90,7 +99,8 @@ function expandWildcards(root: unknown, segments: Segment[]): Segment[][] {
         })
       } else {
         if (!isIndexable(ctx.value)) continue
-        const key = seg.kind === 'field' ? seg.name : String(seg.index)
+        const key = segmentKey(seg)
+        if (key === undefined) continue
         next.push({ value: ctx.value[key], concrete: [...ctx.concrete, seg] })
       }
     }

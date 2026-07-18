@@ -70,4 +70,23 @@ describe('setJsonPath', () => {
     const updated = setJsonPath(obj, 'missing.field', 'x')
     expect(updated).toEqual(obj)
   })
+
+  it('does not traverse into Object.prototype via a __proto__ segment (audit finding LOW-10)', () => {
+    const obj = { a: 'value' }
+    setJsonPath(obj, '__proto__.polluted', 'x')
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  it('does not traverse into a shared prototype via a constructor.prototype segment (audit finding LOW-10)', () => {
+    const obj = { a: 'value' }
+    setJsonPath(obj, 'a.constructor.prototype.toString', 'polluted')
+    expect(typeof Object.prototype.toString).toBe('function')
+  })
+
+  it('reports __proto__/constructor/prototype segments as not existing rather than as inherited members', () => {
+    const obj = { a: 'value' }
+    const accessor = resolveJsonPath(obj, 'constructor.name') as PathAccessor
+    expect(accessor.exists).toBe(false)
+    expect(accessor.get()).toBeUndefined()
+  })
 })
