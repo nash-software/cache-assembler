@@ -96,6 +96,15 @@ matching the volatile span to relocate. Add a fixture under
 `test/fixtures/` and a case in `test/presets.test.ts` verifying every
 planted span is found.
 
+## Validation
+
+The initial release ships with a full validation report — a controlled
+A/B experiment against the real Anthropic API (8.2x cost reduction,
+$1.33 → $0.16 per 100-turn session), a feature-by-feature mechanism
+study, and four real bugs found and fixed by battle-testing against
+production traffic. Read it, or reproduce it yourself with your own
+Claude subscription: [`docs/validation-report.md`](./docs/validation-report.md).
+
 ## Design notes
 
 - Zero runtime dependencies, zero imports from other proxy-manager
@@ -111,3 +120,9 @@ planted span is found.
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+## Author
+
+Built by [Michael Nash](https://www.linkedin.com/in/michael-nash-504838b3/) —
+independent software consultant, [nashsoftware.dev](https://nashsoftware.dev).
+Issues and PRs welcome; see [CONTRIBUTING.md](./CONTRIBUTING.md).
