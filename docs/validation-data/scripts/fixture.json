@@ -1,0 +1,31 @@
+{
+  "model": "claude-fable-5",
+  "system": [
+    {
+      "type": "text",
+      "text": "<system-reminder>Scratchpad directory: /tmp/claude/scratchpad/a1b2c3d4-e5f6-47a8-b9c0-d1e2f3a4b5c6/workspace. Use this directory for all temporary file needs.</system-reminder>"
+    },
+    {
+      "type": "text",
+      "text": "session-id: 8f14e45f-ceea-467e-bd42-ce8ea5b1a12b active session context for this conversation."
+    }
+  ],
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "Reads a file from the local filesystem.",
+      "input_schema": { "type": "object", "properties": { "path": { "type": "string" } } }
+    },
+    {
+      "name": "browse_session",
+      "description": "Open the current session in a browser: https://claude.ai/code/session_012kpcX8paHadnC9wNqomTcE for review.",
+      "input_schema": { "type": "object", "properties": {} }
+    }
+  ],
+  "messages": [
+    { "role": "user", "content": "Hello, please help me with a task." },
+    { "role": "assistant", "content": "Sure, I can help with that. What do you need?" },
+    { "role": "user", "content": "Here is more detail about the task at hand." },
+    { "role": "assistant", "content": "Understood, proceeding now." }
+  ]
+}

@@ -3,7 +3,7 @@
 Question this answers: a reported cost-reduction multiplier (e.g. "8.2x") —
 is that specific to a heavy-tooling, heavy-parallelism setup, or would most
 Claude Code users see something similar? Analysis done 2026-07-19 against
-real production trace-log data from the nash-vps deployment.
+real production trace-log data from a live VPS deployment.
 
 ## Real production numbers, split by deferral off vs. on
 

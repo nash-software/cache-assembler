@@ -4,6 +4,24 @@
   "private": false,
   "description": "Rewrites Anthropic Messages API requests for maximal prompt-cache reuse",
   "license": "MIT",
+  "author": "Michael Nash (https://nashsoftware.dev)",
+  "homepage": "https://github.com/nash-software/cache-assembler#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nash-software/cache-assembler.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nash-software/cache-assembler/issues"
+  },
+  "keywords": [
+    "anthropic",
+    "claude",
+    "prompt-caching",
+    "llm",
+    "proxy",
+    "cost-optimization",
+    "agents"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

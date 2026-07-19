@@ -1,0 +1,78 @@
+{
+  "generatedAt": "2026-07-17T14:45:20.733Z",
+  "instances": 30,
+  "turns": 6,
+  "layers": {
+    "L0": {
+      "label": "L0 — Baseline: no proxy at all, direct to API",
+      "cacheHitRate": 0,
+      "estSavedUsd": 0,
+      "requests": 180,
+      "cacheReads": 0,
+      "cacheWrites": 0,
+      "cacheReadTokens": 0,
+      "cacheCreationTokens": 0,
+      "failures": 0
+    },
+    "L1": {
+      "label": "L1 — F2 naive: breakpoints placed over jittered (non-canonical) tool key order",
+      "cacheHitRate": 0.03888888888888889,
+      "estSavedUsd": -0.29983319999999997,
+      "requests": 180,
+      "cacheReads": 7,
+      "cacheWrites": 180,
+      "cacheReadTokens": 2314,
+      "cacheCreationTokens": 102027,
+      "failures": 0
+    },
+    "L2": {
+      "label": "L2 — F1+F2: canonicalize + breakpoints (isolates F1’s real contribution over L1)",
+      "cacheHitRate": 0.8333333333333334,
+      "estSavedUsd": 0.10122300000000001,
+      "requests": 180,
+      "cacheReads": 150,
+      "cacheWrites": 180,
+      "cacheReadTokens": 72690,
+      "cacheCreationTokens": 31680,
+      "failures": 0
+    },
+    "L3": {
+      "label": "L3 — +F4: barrier enabled (= library defaults); ~0 effect expected on solo sessions",
+      "cacheHitRate": 0.8333333333333334,
+      "estSavedUsd": 0.10122300000000001,
+      "requests": 180,
+      "cacheReads": 150,
+      "cacheWrites": 180,
+      "cacheReadTokens": 72690,
+      "cacheCreationTokens": 31680,
+      "failures": 0
+    },
+    "L4": {
+      "label": "L4 — +F3 dry-run: preview of deferral savings, no bytes changed",
+      "cacheHitRate": 0.8333333333333334,
+      "estSavedUsd": 0.10122300000000001,
+      "requests": 180,
+      "cacheReads": 150,
+      "cacheWrites": 180,
+      "cacheReadTokens": 72690,
+      "cacheCreationTokens": 31680,
+      "failures": 0
+    },
+    "L5": {
+      "label": "L5 — +F3 active: deferral applied, volatile bytes relocated out of the stable prefix",
+      "cacheHitRate": 0.9944444444444445,
+      "estSavedUsd": 0.2583045,
+      "requests": 180,
+      "cacheReads": 179,
+      "cacheWrites": 6,
+      "cacheReadTokens": 96775,
+      "cacheCreationTokens": 996,
+      "failures": 0
+    }
+  },
+  "concurrency": {
+    "instances": 8,
+    "barrierOnWrites": 1,
+    "barrierOffWrites": 8
+  }
+}

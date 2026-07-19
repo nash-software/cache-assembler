@@ -1,0 +1,11 @@
+{
+  "note": "Additional usage tiers computed after feedback that the original single 324-sessions/day fleet projection was not relatable to most readers. Uses the same measured per-session token shape as model-projections.json, priced at Claude Sonnet 5 standard rate ($3/$3.75/$0.30/$15 per MTok base/5m-write/read/output) for a representative middle-tier model. Other models scale by their base-price ratio to Sonnet (Haiku ~0.33x, Opus ~1.67x, Fable ~3.33x), since the reduction ratio itself is model-invariant (verified: ~8.2x across all models in model-projections.json).",
+  "perSessionSavedUsd_sonnetStandard": 3.5004,
+  "tiers": [
+    { "label": "Solo developer, light use", "sessionsPerDay": 3, "dayUsd": 10.50, "weekUsd": 52.51, "monthUsd": 220.52 },
+    { "label": "Solo developer, daily agentic use", "sessionsPerDay": 10, "dayUsd": 35.00, "weekUsd": 175.02, "monthUsd": 735.08 },
+    { "label": "Small team (3-5 people)", "sessionsPerDay": 30, "dayUsd": 105.01, "weekUsd": 525.06, "monthUsd": 2205.25 },
+    { "label": "Growing team, regular agent dispatch", "sessionsPerDay": 100, "dayUsd": 350.04, "weekUsd": 1750.20, "monthUsd": 7350.82 },
+    { "label": "Large automated fleet (upper bound)", "sessionsPerDay": 324, "dayUsd": 1134.13, "weekUsd": 5670.63, "monthUsd": 23816.67 }
+  ]
+}

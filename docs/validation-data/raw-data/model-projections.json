@@ -1,0 +1,70 @@
+{
+  "off": {
+    "input": 1329304,
+    "create": 0,
+    "read": 0
+  },
+  "on": {
+    "input": 18165,
+    "create": 11172,
+    "read": 1303767
+  },
+  "SESSIONS_PER_DAY": 324,
+  "rows": [
+    {
+      "name": "Haiku 4.5",
+      "perSessionOff": 1.329304,
+      "perSessionOn": 0.1625067,
+      "perSessionSaved": 1.1667973,
+      "day": 378.0423252,
+      "week": 1890.211626,
+      "month": 7938.8888292,
+      "dayOffCost": 430.694496,
+      "dayOnCost": 52.6521708
+    },
+    {
+      "name": "Sonnet 5 (intro, through Aug 31 2026)",
+      "perSessionOff": 2.658608,
+      "perSessionOn": 0.3250134,
+      "perSessionSaved": 2.3335946,
+      "day": 756.0846504,
+      "week": 3780.423252,
+      "month": 15877.7776584,
+      "dayOffCost": 861.388992,
+      "dayOnCost": 105.3043416
+    },
+    {
+      "name": "Sonnet 5 (standard, from Sep 1 2026)",
+      "perSessionOff": 3.987912,
+      "perSessionOn": 0.48752009999999996,
+      "perSessionSaved": 3.5003919000000003,
+      "day": 1134.1269756000002,
+      "week": 5670.634878000001,
+      "month": 23816.666487600003,
+      "dayOffCost": 1292.083488,
+      "dayOnCost": 157.95651239999998
+    },
+    {
+      "name": "Opus 4.8",
+      "perSessionOff": 6.64652,
+      "perSessionOn": 0.8125335,
+      "perSessionSaved": 5.8339865,
+      "day": 1890.211626,
+      "week": 9451.05813,
+      "month": 39694.444146,
+      "dayOffCost": 2153.47248,
+      "dayOnCost": 263.260854
+    },
+    {
+      "name": "Fable 5",
+      "perSessionOff": 13.29304,
+      "perSessionOn": 1.625067,
+      "perSessionSaved": 11.667973,
+      "day": 3780.423252,
+      "week": 18902.11626,
+      "month": 79388.888292,
+      "dayOffCost": 4306.94496,
+      "dayOnCost": 526.521708
+    }
+  ]
+}
