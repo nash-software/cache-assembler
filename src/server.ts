@@ -8,11 +8,13 @@ import {
   type ServerResponse,
 } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import type { AnthropicRequestLike, AssemblerState, Usage } from './types.js'
+import { appendFileSync } from 'node:fs'
+import { createHash, randomUUID } from 'node:crypto'
+import type { AnthropicRequestLike, AssembleReport, AssemblerState, Usage } from './types.js'
 import { resolveConfig, type CacheAssemblerConfig } from './config.js'
 import { assemble } from './assemble.js'
 import { WriteBarrier, type WriteBarrierRole } from './barrier.js'
-import { TelemetryStore } from './telemetry.js'
+import { TelemetryStore, computeRequestEconomics, type RequestEconomics } from './telemetry.js'
 
 export interface ProxyServerOptions {
   upstream: string
@@ -22,6 +24,14 @@ export interface ProxyServerOptions {
   state?: AssemblerState
   /** Max request body size in bytes before a 413 is returned. Default 10MB. */
   maxBodyBytes?: number
+  /**
+   * Path to append one JSON line per proxied request to, for line-by-line
+   * analysis of concurrent-session cache economics. Opt-in — omit to skip
+   * tracing entirely with zero behavior change.
+   */
+  traceLogPath?: string
+  /** Max time to wait on the upstream request/response before aborting. Default 120s. */
+  upstreamTimeoutMs?: number
 }
 
 const MESSAGES_PATH = '/v1/messages'
@@ -29,8 +39,9 @@ const HOP_PATH_PREFIX = '/hop/'
 const HEALTH_PATH = '/health'
 const STATS_PATH = '/stats'
 const LOG_PREFIX = '[cache-assembler]'
-const EXCLUDED_FORWARD_HEADERS = new Set(['host', 'content-length', 'connection'])
+const EXCLUDED_FORWARD_HEADERS = new Set(['host', 'content-length', 'connection', 'accept-encoding'])
 const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 120_000
 
 function isProxiedPath(pathname: string): boolean {
   return pathname === MESSAGES_PATH || pathname.startsWith(HOP_PATH_PREFIX)
@@ -109,6 +120,72 @@ interface UpstreamResponse {
   body: IncomingMessage
 }
 
+const REDACTED_HEADER_KEYS = new Set(['authorization', 'proxy-authorization', 'x-api-key', 'cookie', 'set-cookie'])
+
+/**
+ * Redacts known-sensitive headers by key but otherwise keeps everything —
+ * we don't know in advance which header (if any) a client uses to
+ * distinguish concurrent sessions/agents, so the trace log captures the
+ * full set rather than a pre-decided allowlist.
+ */
+function safeHeaders(headers: IncomingHttpHeaders): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    if (value === undefined) continue
+    out[key] = REDACTED_HEADER_KEYS.has(key.toLowerCase()) ? '[redacted]' : Array.isArray(value) ? value.join(', ') : value
+  }
+  return out
+}
+
+/**
+ * Fingerprints the calling tenant from its auth header so the write barrier
+ * (below) doesn't fan out a follower to wait on a leader it can never
+ * observe the cache write of. Hashed rather than stored raw: the barrier key
+ * only needs to distinguish callers, never needs to recover the credential.
+ */
+function callerFingerprint(headers: IncomingHttpHeaders): string {
+  const credential = headers['authorization'] ?? headers['x-api-key'] ?? ''
+  const raw = Array.isArray(credential) ? credential.join(',') : credential
+  return createHash('sha256').update(raw).digest('hex').slice(0, 16)
+}
+
+interface TraceEntry {
+  ts: string
+  requestId: string
+  pathname: string
+  remotePort?: number
+  headers: Record<string, string>
+  prefixHash?: string
+  barrierRole?: WriteBarrierRole
+  assemble?: {
+    canonicalizeApplied: boolean
+    breakpointsPlaced: number
+    deferralMode: AssembleReport['features']['deferral']['mode']
+    deferredCount: number
+  }
+  assembleError?: string
+  usage?: Usage
+  economics?: RequestEconomics
+  latencyMs: number
+  upstreamStatus?: number
+  error?: string
+}
+
+function writeTrace(path: string, entry: TraceEntry): void {
+  try {
+    appendFileSync(path, `${JSON.stringify(entry)}\n`, 'utf8')
+  } catch (err) {
+    console.error(`${LOG_PREFIX} trace log write failed`, err)
+  }
+}
+
+/**
+ * Never forwards the client's own accept-encoding — forces 'identity' so the
+ * upstream response body is always plain text. Without this, a real
+ * upstream (which will happily gzip/br-compress a streamed response when a
+ * client permits it) produces bytes that extractUsage cannot parse, and
+ * telemetry silently never records a single request.
+ */
 function buildForwardHeaders(original: IncomingHttpHeaders, payloadLength: number): OutgoingHttpHeaders {
   const headers: OutgoingHttpHeaders = {}
   for (const [key, value] of Object.entries(original)) {
@@ -117,6 +194,7 @@ function buildForwardHeaders(original: IncomingHttpHeaders, payloadLength: numbe
   }
   headers['content-type'] = headers['content-type'] ?? 'application/json'
   headers['content-length'] = payloadLength
+  headers['accept-encoding'] = 'identity'
   return headers
 }
 
@@ -125,6 +203,7 @@ function forwardToUpstream(
   pathname: string,
   originalHeaders: IncomingHttpHeaders,
   body: string,
+  signal: AbortSignal,
 ): Promise<UpstreamResponse> {
   const target = new URL(pathname, upstream)
   const requestFn = target.protocol === 'https:' ? httpsRequest : httpRequest
@@ -133,7 +212,7 @@ function forwardToUpstream(
   return new Promise((resolve, reject) => {
     const outgoing = requestFn(
       target,
-      { method: 'POST', headers: buildForwardHeaders(originalHeaders, payload.length) },
+      { method: 'POST', headers: buildForwardHeaders(originalHeaders, payload.length), signal },
       (upstreamRes) => {
         resolve({ statusCode: upstreamRes.statusCode ?? 502, headers: upstreamRes.headers, body: upstreamRes })
       },
@@ -157,12 +236,53 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
   const state: AssemblerState = opts.state ?? { knownPrefixHashes: [] }
   const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES
 
-  async function handleProxiedRequest(req: IncomingMessage, res: ServerResponse, pathname: string): Promise<void> {
+  async function handleProxiedRequest(req: IncomingMessage, res: ServerResponse, pathname: string, forwardPath: string): Promise<void> {
+    const startedAt = Date.now()
+
+    // Bounds the upstream call two ways: a hard timeout (a hung upstream must
+    // not hang the client forever), and client-abort cancellation (if the
+    // client goes away mid-request, the upstream request is destroyed rather
+    // than continuing to be paid for and buffered to completion).
+    //
+    // res's 'close' (not req's) is the correct signal here, checked against
+    // writableEnded: req.on('close', ...) fires as soon as the REQUEST BODY
+    // finishes being read — which happens almost immediately for a normal
+    // request, long before we're anywhere near done — so it produced a false
+    // "client disconnected" on every single request. res only closes once
+    // the underlying connection closes; writableEnded tells us whether that
+    // happened because we legitimately finished (true) or because the client
+    // actually went away first (false).
+    const upstreamAbort = new AbortController()
+    res.on('close', () => {
+      if (!res.writableEnded) upstreamAbort.abort()
+    })
+    const upstreamTimeoutMs = opts.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS
+    const upstreamSignal = AbortSignal.any([upstreamAbort.signal, AbortSignal.timeout(upstreamTimeoutMs)])
+
+    const trace: TraceEntry | undefined =
+      opts.traceLogPath === undefined
+        ? undefined
+        : {
+            ts: new Date(startedAt).toISOString(),
+            requestId: randomUUID(),
+            pathname,
+            remotePort: req.socket.remotePort,
+            headers: safeHeaders(req.headers),
+            latencyMs: 0,
+          }
+    const emitTrace = (): void => {
+      if (trace === undefined || opts.traceLogPath === undefined) return
+      trace.latencyMs = Date.now() - startedAt
+      writeTrace(opts.traceLogPath, trace)
+    }
+
     let rawBody: string
     try {
       rawBody = await readRequestBody(req, maxBodyBytes)
     } catch (err) {
       if (err instanceof PayloadTooLargeError) {
+        if (trace !== undefined) trace.error = 'payload too large'
+        emitTrace()
         sendJson(res, 413, { error: 'payload too large' })
         return
       }
@@ -176,46 +296,78 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       const result = assemble(originalReq, opts.config ?? {}, state)
       outgoingBody = JSON.stringify(result.req)
       prefixHash = result.report.prefixHash
+      if (trace !== undefined) {
+        trace.prefixHash = prefixHash
+        trace.assemble = {
+          canonicalizeApplied: result.report.features.canonicalize.applied,
+          breakpointsPlaced: result.report.features.breakpoints.placed.length,
+          deferralMode: result.report.features.deferral.mode,
+          deferredCount: result.report.features.deferral.moved.length,
+        }
+      }
     } catch (err) {
       console.error(`${LOG_PREFIX} assemble failed, forwarding original request`, err)
+      if (trace !== undefined) trace.assembleError = err instanceof Error ? err.message : String(err)
     }
 
+    // Tenant-scoped: two different callers hashing to the same prefix must
+    // not fan out as leader/follower of each other — a follower can never
+    // observe a cache write made under a leader's own credential.
+    const barrierKey = prefixHash === undefined ? undefined : `${prefixHash}:${callerFingerprint(req.headers)}`
+
     let role: WriteBarrierRole = 'leader'
-    if (cfg.barrier.enabled && prefixHash !== undefined) {
+    if (cfg.barrier.enabled && barrierKey !== undefined) {
       try {
-        role = (await barrier.enter(prefixHash)).role
+        role = (await barrier.enter(barrierKey)).role
       } catch (err) {
         console.error(`${LOG_PREFIX} barrier enter failed, proceeding without coordination`, err)
       }
     }
+    if (trace !== undefined) trace.barrierRole = cfg.barrier.enabled ? role : undefined
+
+    const needsUsageBuffer = cfg.telemetry.enabled && prefixHash !== undefined
 
     try {
-      const upstreamRes = await forwardToUpstream(opts.upstream, pathname, req.headers, outgoingBody)
+      const upstreamRes = await forwardToUpstream(opts.upstream, forwardPath, req.headers, outgoingBody, upstreamSignal)
       res.writeHead(upstreamRes.statusCode, upstreamRes.headers)
+      if (trace !== undefined) trace.upstreamStatus = upstreamRes.statusCode
 
       const chunks: Buffer[] = []
       let firstByteSignaled = false
       for await (const chunk of upstreamRes.body as AsyncIterable<Buffer>) {
-        if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && prefixHash !== undefined) {
-          barrier.firstByte(prefixHash)
+        if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && barrierKey !== undefined) {
+          barrier.firstByte(barrierKey)
           firstByteSignaled = true
         }
-        chunks.push(chunk)
+        // Only accumulate the full body when something will actually read it
+        // back (usage extraction for telemetry) — otherwise every proxied
+        // response was fully buffered in memory for no reason, even with
+        // telemetry disabled.
+        if (needsUsageBuffer) chunks.push(chunk)
         res.write(chunk)
       }
       res.end()
 
-      if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && prefixHash !== undefined) {
-        barrier.firstByte(prefixHash)
+      if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && barrierKey !== undefined) {
+        barrier.firstByte(barrierKey)
       }
 
-      if (cfg.telemetry.enabled && prefixHash !== undefined) {
+      if (needsUsageBuffer && prefixHash !== undefined) {
         const usage = extractUsage(Buffer.concat(chunks).toString('utf8'))
-        if (usage !== undefined) telemetry.record({ prefixHash, usage })
+        if (usage !== undefined) {
+          telemetry.record({ prefixHash, usage })
+          if (trace !== undefined) {
+            trace.usage = usage
+            trace.economics = computeRequestEconomics(usage, telemetry.pricing())
+          }
+        }
       }
+      emitTrace()
     } catch (err) {
-      if (cfg.barrier.enabled && prefixHash !== undefined) barrier.fail(prefixHash)
+      if (cfg.barrier.enabled && barrierKey !== undefined) barrier.fail(barrierKey)
       console.error(`${LOG_PREFIX} upstream request failed`, err)
+      if (trace !== undefined) trace.error = err instanceof Error ? err.message : String(err)
+      emitTrace()
       if (!res.headersSent) sendJson(res, 502, { error: 'upstream request failed' })
       else res.end()
     }
@@ -237,7 +389,7 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       // resolves; a client abort mid-body rejects before that point, so this
       // outer .catch is the only thing standing between that and an
       // unhandled rejection crashing a long-running proxy process.
-      handleProxiedRequest(req, res, url.pathname).catch((err: unknown) => {
+      handleProxiedRequest(req, res, url.pathname, url.pathname + url.search).catch((err: unknown) => {
         console.error(`${LOG_PREFIX} request handling failed`, err)
         if (!res.headersSent) sendJson(res, 502, { error: 'request failed' })
         else res.end()

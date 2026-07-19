@@ -4,3 +4,6 @@ dist/
 test/e2e/results/
 *.log
 .DS_Store
+.claude/
+scratchpads/
+.agent-run/

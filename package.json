@@ -21,12 +21,16 @@
   "scripts": {
     "type-check": "tsc --noEmit",
     "test:unit": "vitest run",
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json",
+    "e2e:synthetic": "tsx test/e2e/synthetic/run-synthetic.ts",
+    "e2e:report": "tsx test/e2e/report/build-report.ts",
+    "e2e:real": "tsx test/e2e/real-cli/run-real-cli.ts"
   },
   "dependencies": {},
   "devDependencies": {
     "@types/node": "^20.17.10",
     "fast-check": "^3.23.1",
+    "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vitest": "^4.1.8"
   }

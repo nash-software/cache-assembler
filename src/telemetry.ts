@@ -1,6 +1,7 @@
 import type { AnthropicRequestLike, AssembleReport, Extractor, Usage } from './types.js'
 import { canonicalizeRequest, canonicalStringify } from './canonicalize.js'
 import { resolveJsonPath, type PathAccessor } from './json-path.js'
+import { isPotentiallyCatastrophicPattern } from './regex-safety.js'
 
 export interface TelemetryEntry {
   prefixHash: string
@@ -59,6 +60,38 @@ const DEFAULT_BASE_PRICE_PER_MTOK = 3
 const CACHE_READ_PRICE_MULTIPLIER = 0.1
 const CACHE_WRITE_PRICE_MULTIPLIER = 2
 
+export interface RequestEconomics {
+  actualUsd: number
+  counterfactualUsd: number
+  netSavedUsd: number
+}
+
+export interface EconomicsPricing {
+  basePricePerMTok: number
+  cacheReadPricePerMTok: number
+  cacheWritePricePerMTok: number
+}
+
+/**
+ * The single source of truth for cache economics math — shared by the
+ * aggregate TelemetryStore.stats() and any per-request trace line, so the
+ * two can never drift apart. actualUsd is what was really paid (creation
+ * tokens at write price, read tokens at read price); counterfactualUsd is
+ * what that same token volume would have cost as plain uncached input;
+ * netSavedUsd is the honest difference.
+ */
+export function computeRequestEconomics(
+  usage: { cache_creation_input_tokens?: number; cache_read_input_tokens?: number },
+  pricing: EconomicsPricing,
+): RequestEconomics {
+  const creationTokens = usage.cache_creation_input_tokens ?? ZERO_TOKENS
+  const readTokens = usage.cache_read_input_tokens ?? ZERO_TOKENS
+  const actualUsd =
+    (creationTokens * pricing.cacheWritePricePerMTok + readTokens * pricing.cacheReadPricePerMTok) / TOKENS_PER_MTOK
+  const counterfactualUsd = ((creationTokens + readTokens) * pricing.basePricePerMTok) / TOKENS_PER_MTOK
+  return { actualUsd, counterfactualUsd, netSavedUsd: counterfactualUsd - actualUsd }
+}
+
 const DEFAULT_DIVERGENCE_LRU_CAPACITY = 50
 const DEFAULT_CHAIN_POSITION = 0
 const PREFIX_SLICE_RADIUS = 20
@@ -112,6 +145,7 @@ function matchesExtractorPath(previous: string, next: string, extractors: Extrac
   if (!previousReq || !nextReq) return false
 
   for (const extractor of extractors) {
+    if (isPotentiallyCatastrophicPattern(extractor.pattern)) continue
     const matcher = new RegExp(extractor.pattern, extractor.flags ?? '')
     const previousAccessors = toAccessorList(resolveJsonPath(previousReq, extractor.path))
     const nextAccessors = toAccessorList(resolveJsonPath(nextReq, extractor.path))
@@ -160,6 +194,15 @@ export class TelemetryStore {
       options.pricing?.cacheWritePricePerMTok ?? this.basePricePerMTok * CACHE_WRITE_PRICE_MULTIPLIER
     this.extractors = options.extractors ?? []
     this.divergenceCacheCapacity = options.divergenceCacheCapacity ?? DEFAULT_DIVERGENCE_LRU_CAPACITY
+  }
+
+  /** The resolved pricing this store computes its own stats with — lets a caller (e.g. a per-request trace line) compute economics that can never drift from the aggregate. */
+  pricing(): EconomicsPricing {
+    return {
+      basePricePerMTok: this.basePricePerMTok,
+      cacheReadPricePerMTok: this.cacheReadPricePerMTok,
+      cacheWritePricePerMTok: this.cacheWritePricePerMTok,
+    }
   }
 
   record(entry: TelemetryEntry): void {
@@ -211,15 +254,24 @@ export class TelemetryStore {
   }
 
   stats(): TelemetryStats {
-    const totalCacheTokens = this.cacheCreationTokens + this.cacheReadTokens
-    // estLostUsd: the $ premium paid to write cache entries, net against what
-    // the same cache-touched token volume would have cost at base price.
-    const estLostUsd =
-      (this.cacheCreationTokens * this.cacheWritePricePerMTok - totalCacheTokens * this.basePricePerMTok) /
-      TOKENS_PER_MTOK
-    // estSavedUsd: the $ discount earned from cache reads, net against the
-    // write premium above — a single combined economics estimate.
-    const estSavedUsd = (this.cacheReadTokens * this.cacheReadPricePerMTok) / TOKENS_PER_MTOK - estLostUsd
+    // estLostUsd: the $ premium paid to write cache entries, versus what
+    // those SAME creation tokens would have cost as plain (uncached) input —
+    // always <= 0. estSavedUsd: the full combined net economics estimate
+    // (counterfactual cost of all cache-touched tokens as uncached input,
+    // minus what was actually paid) — computed via the shared formula so it
+    // can never drift from a per-request trace line's own numbers.
+    const rawEstLostUsd =
+      (this.cacheCreationTokens * (this.basePricePerMTok - this.cacheWritePricePerMTok)) / TOKENS_PER_MTOK
+    const estLostUsd = rawEstLostUsd === 0 ? 0 : rawEstLostUsd // avoid -0 when cacheCreationTokens is 0
+    const { netSavedUsd: rawEstSavedUsd } = computeRequestEconomics(
+      { cache_creation_input_tokens: this.cacheCreationTokens, cache_read_input_tokens: this.cacheReadTokens },
+      {
+        basePricePerMTok: this.basePricePerMTok,
+        cacheReadPricePerMTok: this.cacheReadPricePerMTok,
+        cacheWritePricePerMTok: this.cacheWritePricePerMTok,
+      },
+    )
+    const estSavedUsd = rawEstSavedUsd === 0 ? 0 : rawEstSavedUsd // avoid -0 when there's no cache activity
 
     return {
       requests: this.requests,

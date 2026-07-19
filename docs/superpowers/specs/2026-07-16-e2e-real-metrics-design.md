@@ -58,13 +58,27 @@ Cumulative feature layers, mapped onto cache-assembler's real config toggles
 | Layer | Config | Proves |
 |---|---|---|
 | L0 — Baseline | No proxy at all, direct to API | The floor: zero cache coordination |
-| L1 — F1 | `canonicalize.enabled=true`, all else off | Effect of deterministic key ordering alone |
-| L2 — F1+F2 | + `breakpoints.enabled=true` | This is what actually turns caching on |
+| L1 — F2 naive | `breakpoints.enabled=true`, `canonicalize.enabled=false` | Breakpoints alone, over tool definitions that are deliberately re-jittered every turn — isolates what happens *without* F1 |
+| L2 — F1+F2 | + `canonicalize.enabled=true` | F1's real contribution: does canonicalization rescue the cache from the same turn-to-turn tool jitter L1 suffers? |
 | L3 — +F4 | + `barrier.enabled=true` (= library defaults) | Barrier effect on solo (non-concurrent) sessions — expected ~0 |
 | L4 — +F3 dry-run | + `deferral.enabled=true, dryRun=true` w/ `claude-code` preset | Preview of what F3 *would* save, no bytes changed |
 | L5 — +F3 active | + `deferral.dryRun=false` (`--defer`) | Full stack: does deferring scratchpad/session-UUID bytes rescue cache hits across turns? |
 
 Each layer runs in **both** harnesses.
+
+**Amendment (post-first-run correction):** the original L1 (`canonicalize.enabled=true`,
+all else off) was a mechanical no-op — with no breakpoint present, F1 can never produce a
+cache-hit signal regardless of whether it works, and the fixture never varied tool
+serialization in the first place, so there was nothing for F1 to fix either. Fixed by (a)
+adding deterministic per-turn tool key-order jitter to the fixture (`session-turns.ts`,
+simulating a client that re-serializes tools inconsistently request to request), and (b)
+redefining L1 as the naive breakpoint-without-canonicalization case, isolating F1's real
+contribution as the L1→L2 delta. Separately, the synthetic harness's upstream stub
+(`stub-upstream.ts`) originally hashed the growing message history as a closed JSON blob,
+which structurally can never credit an earlier turn's shorter cached prefix as valid (closing
+brackets land at different byte positions for different array lengths) — understating real
+incremental cache reuse and making every layer look like a net loss. Fixed with an
+incremental rolling hash over flat concatenated content, which is genuinely prefix-stable.
 
 ### Synthetic harness
 
