@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createProxyServer } from '../src/server.js'
 import { run } from '../src/cli.js'
 import { defer } from '../src/deferral.js'
+import { isPotentiallyCatastrophicPattern } from '../src/regex-safety.js'
 import type { AnthropicRequestLike } from '../src/types.js'
 
 function listen(server: Server): Promise<number> {
@@ -72,6 +73,78 @@ describe('deferral extractor ReDoS regression (audit finding MEDIUM-5)', () => {
         enabled: true,
         dryRun: true,
         extractors: [{ id: 'evil', path: 'system[*].text', pattern: '^(a+)+$' }],
+      },
+    }
+
+    const started = Date.now()
+    defer(req, cfg)
+    const elapsedMs = Date.now() - started
+
+    expect(elapsedMs).toBeLessThan(500)
+  }, 2000)
+})
+
+// --- Pre-launch review finding: a single compiled matcher (with a `g` flag)
+// was reused across every accessor a wildcard extractor path resolves to.
+// RegExp.exec keeps lastIndex on the instance between calls, so the second
+// accessor's search silently started where the first accessor's match ended.
+// Verified live before the fix: 2 identical spans in 2 system blocks, matched
+// with a `g`-flagged extractor, found only 1 instead of both.
+describe('deferral matcher lastIndex reset across wildcard accessors', () => {
+  it('extracts a matching span from every accessor a wildcard path resolves to, not just the first', () => {
+    const req: AnthropicRequestLike = {
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      system: [
+        { type: 'text', text: 'block one session-abc123 stable text' },
+        { type: 'text', text: 'block two session-abc123 stable text' },
+      ],
+    }
+    const cfg = {
+      deferral: {
+        enabled: true,
+        dryRun: false,
+        extractors: [{ id: 'session', path: 'system[*].text', pattern: 'session-[a-z0-9]+', flags: 'g' }],
+      },
+    }
+
+    const { moved } = defer(req, cfg)
+
+    expect(moved).toHaveLength(2)
+    expect(moved.map((m) => m.text)).toEqual(['session-abc123', 'session-abc123'])
+  })
+})
+
+// --- Pre-launch review finding: the ReDoS guard only caught nested
+// quantifiers, missing overlapping alternation and bounded-quantifier forms.
+// Verified live before the fix: '(a|a)+$' against a 28-char string hung the
+// process past a 30s timeout, and isPotentiallyCatastrophicPattern returned
+// false for both shapes below.
+describe('ReDoS guard covers overlapping alternation and bounded quantifiers', () => {
+  it('flags overlapping alternation under a quantifier', () => {
+    expect(isPotentiallyCatastrophicPattern('(a|a)+$')).toBe(true)
+    expect(isPotentiallyCatastrophicPattern('(a|ab)+$')).toBe(true)
+  })
+
+  it('flags a bounded/ranged quantifier used the same way as +/*', () => {
+    expect(isPotentiallyCatastrophicPattern('(a{1,}){1,}$')).toBe(true)
+    expect(isPotentiallyCatastrophicPattern('(a{1,10}){1,10}$')).toBe(true)
+  })
+
+  it('does not flag a quantified group with no inner quantifier or alternation', () => {
+    expect(isPotentiallyCatastrophicPattern('(abc)+')).toBe(false)
+    expect(isPotentiallyCatastrophicPattern('session-[a-f0-9]{8}')).toBe(false)
+  })
+
+  it('rejects the overlapping-alternation shape end to end via defer(), same as the nested case', () => {
+    const req: AnthropicRequestLike = {
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      system: [{ type: 'text', text: 'a'.repeat(28) + '!' }],
+    }
+    const cfg = {
+      deferral: {
+        enabled: true,
+        dryRun: true,
+        extractors: [{ id: 'evil-alt', path: 'system[*].text', pattern: '^(a|a)+$' }],
       },
     }
 

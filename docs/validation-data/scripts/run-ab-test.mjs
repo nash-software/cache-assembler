@@ -8,12 +8,12 @@
 // client behavior) since both arms send byte-identical starting content.
 //
 // Setup:
-//   1. Run `claude setup-token` (requires a Claude subscription) to produce a
-//      long-lived token, and save it to a file.
+//   1. Get a real Anthropic API key (with billing) from
+//      https://console.anthropic.com/settings/keys and save it to a file.
 //   2. Start the cache-assembler proxy: `cache-assembler --upstream
 //      https://api.anthropic.com --preset claude-code --defer --port 8789`
-//   3. Run: node run-ab-test.mjs <turns> <path-to-token-file> [proxy-url]
-//      e.g. node run-ab-test.mjs 100 ./token.txt http://127.0.0.1:8789/v1/messages
+//   3. Run: node run-ab-test.mjs <turns> <path-to-key-file> [proxy-url]
+//      e.g. node run-ab-test.mjs 100 ./key.txt http://127.0.0.1:8789/v1/messages
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -25,30 +25,29 @@ const DIRECT_UPSTREAM = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-haiku-4-5-20251001';
 
 const TURNS = Number(process.argv[2] ?? 100);
-const TOKEN_PATH = process.argv[3];
+const KEY_PATH = process.argv[3];
 const PROXY_UPSTREAM = process.argv[4] ?? 'http://127.0.0.1:8789/v1/messages';
 const FIXTURE = join(__dirname, 'fixture.json');
 const OUT_PATH = join(__dirname, 'results.json');
 
-if (!TOKEN_PATH) {
-  console.error('Usage: node run-ab-test.mjs <turns> <path-to-token-file> [proxy-url]');
+if (!KEY_PATH) {
+  console.error('Usage: node run-ab-test.mjs <turns> <path-to-key-file> [proxy-url]');
   process.exit(1);
 }
 
-function readAccessToken() {
-  const raw = readFileSync(TOKEN_PATH, 'utf8').trim();
-  if (!raw.startsWith('sk-ant-oat01')) {
-    throw new Error('Token file does not look like a valid long-lived setup-token (expected sk-ant-oat01 prefix).');
+function readApiKey() {
+  const raw = readFileSync(KEY_PATH, 'utf8').trim();
+  if (!raw.startsWith('sk-ant-api')) {
+    throw new Error('Key file does not look like a valid Anthropic API key (expected sk-ant-api prefix). Get one from https://console.anthropic.com/settings/keys');
   }
   return raw;
 }
 
-function authHeaders(accessToken) {
+function authHeaders(apiKey) {
   return {
     'content-type': 'application/json',
-    'authorization': `Bearer ${accessToken}`,
+    'x-api-key': apiKey,
     'anthropic-version': '2023-06-01',
-    'anthropic-beta': 'oauth-2025-04-20,claude-code-20250219',
   };
 }
 
@@ -87,8 +86,8 @@ async function runArm(label, url, headers, turns) {
 }
 
 async function main() {
-  const accessToken = readAccessToken();
-  const headers = authHeaders(accessToken);
+  const apiKey = readApiKey();
+  const headers = authHeaders(apiKey);
 
   console.log(`Building ${TURNS}-turn identical content for both arms...`);
   const paramsA = volatileParams('arm-a-direct');

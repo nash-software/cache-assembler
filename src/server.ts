@@ -256,8 +256,15 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
     res.on('close', () => {
       if (!res.writableEnded) upstreamAbort.abort()
     })
+    // Bounds time-to-first-byte only, not the whole response stream: a real
+    // Claude generation can legitimately stream for minutes, and the earlier
+    // version of this timeout (AbortSignal.timeout composed into the request
+    // signal for its whole lifetime) killed those mid-stream. Cleared as soon
+    // as headers arrive, below; client-abort (upstreamAbort, above) remains
+    // the only thing bounding the body-streaming phase after that.
     const upstreamTimeoutMs = opts.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS
-    const upstreamSignal = AbortSignal.any([upstreamAbort.signal, AbortSignal.timeout(upstreamTimeoutMs)])
+    const headersTimeout = setTimeout(() => upstreamAbort.abort(), upstreamTimeoutMs)
+    const upstreamSignal = upstreamAbort.signal
 
     const trace: TraceEntry | undefined =
       opts.traceLogPath === undefined
@@ -329,6 +336,7 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
 
     try {
       const upstreamRes = await forwardToUpstream(opts.upstream, forwardPath, req.headers, outgoingBody, upstreamSignal)
+      clearTimeout(headersTimeout)
       res.writeHead(upstreamRes.statusCode, upstreamRes.headers)
       if (trace !== undefined) trace.upstreamStatus = upstreamRes.statusCode
 
@@ -364,6 +372,7 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       }
       emitTrace()
     } catch (err) {
+      clearTimeout(headersTimeout)
       if (cfg.barrier.enabled && barrierKey !== undefined) barrier.fail(barrierKey)
       console.error(`${LOG_PREFIX} upstream request failed`, err)
       if (trace !== undefined) trace.error = err instanceof Error ? err.message : String(err)

@@ -40,7 +40,7 @@ F3 ships **disabled and dry-run by default** — it rewrites request bytes, so
 enabling it in a way that changes model-visible content is always an
 explicit opt-in.
 
-## Three ways to use it
+## Two ways to use it
 
 **1. As a pure library** — call `assemble()` directly wherever you build
 requests:
@@ -53,12 +53,7 @@ const { req, report } = assemble(anthropicRequest, config, state)
 // report: what each feature did (breakpoints placed, spans moved, prefix hash)
 ```
 
-**2. As a proxy-manager chain hop** — the package ships a
-`cache-assembler` adapter descriptor; enable it in `proxy-manager`'s config
-like any other hop and requests are rewritten transparently as they pass
-through the chain.
-
-**3. As a standalone binary** — install the package and run it as its own
+**2. As a standalone binary** — install the package and run it as its own
 HTTP proxy in front of any upstream:
 
 ```sh
@@ -68,16 +63,20 @@ npx cache-assembler --upstream https://api.anthropic.com
 ```
 Options:
   --port <n>       Port to listen on (default: 8788)
+  --host <addr>    Address to bind (default: 127.0.0.1, localhost-only)
   --upstream <url> Upstream URL to forward assembled requests to (required)
   --preset <name>  Named preset (e.g. "claude-code") supplying F3 deferral extractors
   --defer          Enable F3 volatile-byte deferral (active mode)
   --dry-run        Force F3 deferral into dry-run (report only, no bytes moved)
+  --trace-log <path>  Append one JSON line per proxied request to this file
+  --upstream-timeout <ms>  Time-to-first-byte timeout (default: 120000)
   --help           Show this help text
   --version        Print the package version
 ```
 
 The standalone server exposes `GET /health` (liveness) and `GET /stats`
-(telemetry as JSON) alongside the proxied `POST /v1/messages` path.
+(telemetry as JSON) alongside the proxied `POST /v1/messages` path (also
+accepted under any `/hop/*` path, for chaining behind another reverse proxy).
 
 ## Presets
 
@@ -103,13 +102,12 @@ A/B experiment against the real Anthropic API (8.2x cost reduction,
 $1.33 → $0.16 per 100-turn session), a feature-by-feature mechanism
 study, and four real bugs found and fixed by battle-testing against
 production traffic. Read it, or reproduce it yourself with your own
-Claude subscription: [`docs/validation-report.md`](./docs/validation-report.md).
+Anthropic API key: [`docs/validation-report.md`](./docs/validation-report.md).
 
 ## Design notes
 
-- Zero runtime dependencies, zero imports from other proxy-manager
-  packages — independently releasable and installable via `npm i
-  cache-assembler`.
+- Zero runtime dependencies — independently releasable and installable via
+  `npm i cache-assembler`.
 - The core `assemble()` function is pure: it never mutates its inputs, and
   every side effect (cache-write coordination, telemetry) lives in the
   injectable proxy wrapper, not the core pipeline.

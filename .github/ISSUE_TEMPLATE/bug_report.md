@@ -16,6 +16,6 @@ labels: bug
 **Environment**
 - cache-assembler version:
 - Node version:
-- Usage mode: library / proxy-manager chain hop / standalone binary
+- Usage mode: library / standalone binary
 
 **Relevant config or request shape** (redact anything sensitive — no real API keys or user content)

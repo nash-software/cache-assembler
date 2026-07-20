@@ -8,8 +8,7 @@ import {
   type HarnessOutput,
 } from './build-report.js'
 
-// Pinned to the real values recorded by npm run e2e:synthetic -- --instances 2
-// this session (see scratchpads/e2e-real-metrics-micro-3.md's verified notes).
+// Pinned to real values recorded by `npm run e2e:synthetic -- --instances 2`.
 const SYNTHETIC_FIXTURE: HarnessOutput = {
   generatedAt: '2026-07-16T23:00:00.000Z',
   instances: 2,

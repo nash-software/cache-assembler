@@ -49,6 +49,12 @@ function extractSpans(req: AnthropicRequestLike, extractors: Extractor[]): { req
       const value = accessor.get()
       if (value === undefined) continue
       const boundedValue = value.length > MAX_EXTRACTOR_INPUT_LENGTH ? value.slice(0, MAX_EXTRACTOR_INPUT_LENGTH) : value
+      // A single matcher is compiled once per extractor and reused across every
+      // accessor a wildcard path resolves to (see compileMatcher above). With a
+      // g/y flag, RegExp.exec keeps lastIndex on the instance between calls, so
+      // without this reset a later accessor's search silently starts wherever the
+      // previous accessor's match ended, dropping matches instead of finding them.
+      matcher.lastIndex = 0
       const match = matcher.exec(boundedValue)
       if (!match) continue
       moved.push({ id: extractor.id, path: accessor.path, text: match[0] })

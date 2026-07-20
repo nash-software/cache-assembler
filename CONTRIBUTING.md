@@ -24,7 +24,7 @@ Presets describe F3 deferral extractors for a known client — see
 
 ## Design constraints (please keep these)
 
-- Zero runtime dependencies, zero imports from other `proxy-manager` packages.
+- Zero runtime dependencies.
 - `assemble()` must stay pure — never mutate its inputs.
 - Fail-open: an error in assembly or barrier coordination should log and
   fall back to forwarding the original request, never break the proxy path.

@@ -29,6 +29,10 @@ Options:
   --dry-run        Force F3 deferral into dry-run (report only, no bytes moved)
   --trace-log <path>  Append one JSON line per proxied request to this file
                    (tokens, cost, barrier role, latency) — opt-in, off by default
+  --upstream-timeout <ms>  Time to wait for the upstream to start responding
+                   before aborting (default: 120000). Bounds time-to-first-byte
+                   only — once headers arrive, a response streams to completion
+                   regardless of length.
   --help           Show this help text
   --version        Print the package version
 `
@@ -61,6 +65,7 @@ interface ParsedCliValues {
   defer?: boolean
   'dry-run'?: boolean
   'trace-log'?: string
+  'upstream-timeout'?: string
   help?: boolean
   version?: boolean
 }
@@ -79,6 +84,7 @@ function parseCliArgs(argv: string[]): ParsedCliValues {
         defer: { type: 'boolean', default: false },
         'dry-run': { type: 'boolean', default: false },
         'trace-log': { type: 'string' },
+        'upstream-timeout': { type: 'string' },
         help: { type: 'boolean', default: false },
         version: { type: 'boolean', default: false },
       },
@@ -103,6 +109,16 @@ function parsePort(rawPort: string | undefined): { port: number } | { error: str
     return { error: `--port must be an integer between ${MIN_PORT} and ${MAX_PORT}, got "${rawPort}"` }
   }
   return { port: parsed }
+}
+
+/** Returns a validated timeout in ms, or an error message if --upstream-timeout is malformed. */
+function parseUpstreamTimeout(raw: string | undefined): { timeoutMs?: number } | { error: string } {
+  if (raw === undefined) return {}
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isInteger(parsed) || String(parsed) !== raw.trim() || parsed <= 0) {
+    return { error: `--upstream-timeout must be a positive integer (milliseconds), got "${raw}"` }
+  }
+  return { timeoutMs: parsed }
 }
 
 /** Returns null if the upstream URL is well-formed, or an error message. */
@@ -163,13 +179,24 @@ export function run(argv: string[], io: CliIO = DEFAULT_IO): number | undefined 
     return 1
   }
 
+  const timeoutResult = parseUpstreamTimeout(values['upstream-timeout'])
+  if ('error' in timeoutResult) {
+    io.stderr(`Error: ${timeoutResult.error}\n\n${HELP_TEXT}`)
+    return 1
+  }
+
   // Default localhost-only: binding 0.0.0.0 by default would turn this into
   // an unauthenticated open relay (forwards a raw upstream API key) plus a
   // /stats endpoint exposing aggregate token/cost counters to anyone on the
   // network. LAN/network exposure is opt-in via an explicit --host.
   const host = values.host ?? DEFAULT_HOST
   const config = buildConfig(values)
-  const server = createProxyServer({ upstream: values.upstream, config, traceLogPath: values['trace-log'] })
+  const server = createProxyServer({
+    upstream: values.upstream,
+    config,
+    traceLogPath: values['trace-log'],
+    upstreamTimeoutMs: timeoutResult.timeoutMs,
+  })
   server.on('error', (err: NodeJS.ErrnoException) => {
     io.stderr(`Error: failed to start server on ${host}:${portResult.port}: ${err.message}\n`)
     process.exitCode = 1

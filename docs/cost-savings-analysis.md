@@ -26,9 +26,12 @@ Two honest notes on this data:
   swing in the aggregate multiplier. Its value is more about *preventing a
   worse number* than *making a good number better*, and that's hard to see
   without a controlled A/B on otherwise-identical traffic.
-- 6.2–6.4x is in the same ballpark as an externally-reported "8.2x" figure
-  for this same deployment, but not identical — plausibly a different
-  measurement window or methodology, not a contradiction.
+- 6.2–6.4x is in the same ballpark as the 8.2x figure from the controlled
+  A/B experiment (see [`docs/validation-report.md`](./validation-report.md)),
+  but it's not the same measurement — that experiment used deterministic
+  synthetic content sent twice under controlled conditions, while this is
+  live production traffic. Close agreement between the two is a useful
+  sanity check, not a claim that they measure the same thing.
 
 ## Why a heavy-tooling, heavy-parallelism setup plausibly sees a bigger multiplier
 

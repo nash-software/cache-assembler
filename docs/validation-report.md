@@ -6,12 +6,11 @@ Point your client at the proxy instead of `api.anthropic.com` and it
 canonicalizes, arranges, and annotates each request so that as much of it as
 possible is served from Anthropic's prompt cache at ~0.1x the base input price.
 
-This document is the validation report for the initial public release. It was
-prepared by an independent reviewer who cross-checked every number below
-against the raw data and test scripts (all included in this repository), and
-it is organized by strength of evidence: a controlled A/B experiment first,
-then projections, then supporting evidence, then everything we know is still
-unproven.
+This document is the validation report for the initial public release. Every
+number below was cross-checked against the raw data and test scripts (all
+included in this repository), and it is organized by strength of evidence: a
+controlled A/B experiment first, then projections, then supporting evidence,
+then everything we know is still unproven.
 
 **Headline result, up front:** an identical 100-turn conversation sent to the
 real Anthropic API twice — once directly, once through the proxy — cost
@@ -58,7 +57,7 @@ floor), two tool definitions, and a message history that grows by one exchange
 per turn. The same seed produces byte-identical output every run.
 
 The identical content is then sent twice, against the real Anthropic API,
-authenticated with a real long-lived token from `claude setup-token`:
+authenticated with a real Anthropic API key:
 
 - **Arm A — direct:** straight to `api.anthropic.com`. cache-assembler is
   entirely out of the loop.
@@ -355,19 +354,18 @@ consolidated list.
 
 ## Reproduce it yourself
 
-The A/B experiment requires no API key with billing attached — a Claude
-subscription is enough — and costs about **$1.50** in real usage (arm A is
-~$1.33 of deliberately uncached Haiku traffic; arm B is ~$0.16).
+The A/B experiment needs a real Anthropic API key with billing enabled and
+costs about **$1.50** in real usage (arm A is ~$1.33 of deliberately
+uncached Haiku traffic; arm B is ~$0.16).
 
-**Prerequisites:** Node.js 18+ (uses built-in `fetch`), a Claude
-subscription, and this repository.
+**Prerequisites:** Node.js 18+ (uses built-in `fetch`), an Anthropic API key
+from [console.anthropic.com](https://console.anthropic.com/settings/keys),
+and this repository.
 
-**1. Get a long-lived token.**
+**1. Get an API key** from the Anthropic Console and save it to a file:
 
 ```sh
-claude setup-token
-# copy the resulting token (starts with sk-ant-oat01-...) into a file:
-echo "sk-ant-oat01-..." > token.txt
+echo "sk-ant-api03-..." > key.txt
 ```
 
 **2. Start the cache-assembler proxy** (full feature stack on):
@@ -379,7 +377,7 @@ cache-assembler --upstream https://api.anthropic.com --preset claude-code --defe
 **3. Run both arms.** From the `docs/validation-data/scripts/` directory:
 
 ```sh
-node run-ab-test.mjs 100 ./token.txt http://127.0.0.1:8789/v1/messages
+node run-ab-test.mjs 100 ./key.txt http://127.0.0.1:8789/v1/messages
 ```
 
 The script builds the 100-turn deterministic content once
