@@ -4,7 +4,7 @@
 
 Please **do not** open a public GitHub issue for security vulnerabilities.
 
-Instead, email **security@nashsoftware.dev** with:
+Instead, email **mike@nashsoftware.dev** with:
 - A description of the issue and its potential impact
 - Steps to reproduce (a minimal request shape is ideal — redact any real
   API keys, tokens, or user content)

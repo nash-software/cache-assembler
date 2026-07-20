@@ -26,7 +26,7 @@ Examples of unacceptable behavior:
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to **security@nashsoftware.dev**. All complaints will be reviewed
+reported to **mike@nashsoftware.dev**. All complaints will be reviewed
 and investigated promptly and fairly.
 
 ## Attribution
