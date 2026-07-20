@@ -34,12 +34,13 @@
   },
   "files": ["dist", "presets", "README.md", "LICENSE"],
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.3.0"
   },
   "scripts": {
     "type-check": "tsc --noEmit",
     "test:unit": "vitest run",
     "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run type-check && npm run test:unit && npm run build",
     "e2e:synthetic": "tsx test/e2e/synthetic/run-synthetic.ts",
     "e2e:report": "tsx test/e2e/report/build-report.ts",
     "e2e:real": "tsx test/e2e/real-cli/run-real-cli.ts"
