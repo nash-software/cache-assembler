@@ -350,11 +350,18 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       clearTimeout(headersTimeout)
       res.writeHead(upstreamRes.statusCode, upstreamRes.headers)
       if (trace !== undefined) trace.upstreamStatus = upstreamRes.statusCode
+      // A non-2xx upstream response (e.g. 429) is a normal HTTP response, not
+      // a thrown error, so the catch block below never sees it. Only a 2xx
+      // means the cache write the leader triggered actually happened —
+      // warming the barrier for anything else would tell the next
+      // identical-prefix caller to wait as a follower on a write that never
+      // landed.
+      const isSuccessStatus = upstreamRes.statusCode >= 200 && upstreamRes.statusCode < 300
 
       const chunks: Buffer[] = []
       let firstByteSignaled = false
       for await (const chunk of upstreamRes.body as AsyncIterable<Buffer>) {
-        if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && barrierKey !== undefined) {
+        if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && barrierKey !== undefined && isSuccessStatus) {
           barrier.firstByte(barrierKey)
           firstByteSignaled = true
         }
@@ -368,7 +375,16 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       res.end()
 
       if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && barrierKey !== undefined) {
-        barrier.firstByte(barrierKey)
+        if (isSuccessStatus) {
+          barrier.firstByte(barrierKey)
+        } else {
+          // Leader's response was non-2xx: clear the pending entry so the
+          // next identical-prefix caller enters fresh as a leader instead of
+          // waiting as a follower on a write that never happened. Safe even
+          // if this hash was already warmed by a prior successful request —
+          // fail() no-ops on a warm entry (item 5).
+          barrier.fail(barrierKey)
+        }
       }
 
       if (needsUsageBuffer && prefixHash !== undefined) {

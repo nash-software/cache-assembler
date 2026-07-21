@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createProxyServer } from '../src/server.js'
+import { WriteBarrier } from '../src/barrier.js'
 
 function listen(server: Server): Promise<number> {
   return new Promise((resolve) => {
@@ -145,5 +146,61 @@ describe('forwardToUpstream preserves a configured upstream path segment (item 3
     })
 
     expect(receivedPath).toBe('/base/v1/messages?beta=true')
+  })
+})
+
+// --- Items 4 & 5: the write barrier must only warm on an actual 2xx
+// response, and fail() must never evict an already-warm entry.
+describe('write barrier only warms on 2xx and fail() no-ops on warm entries (items 4 & 5)', () => {
+  it('a leader receiving a non-2xx upstream response leaves the barrier fresh for the next identical-prefix caller', async () => {
+    let requestCount = 0
+    const upstream = await startFakeUpstream((_req, res) => {
+      requestCount += 1
+      if (requestCount === 1) {
+        res.writeHead(429, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: { message: 'rate limited' } }))
+      } else {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ usage: { input_tokens: 10 } }))
+      }
+    })
+
+    const dir = mkdtempSync(join(tmpdir(), 'cache-assembler-quality-'))
+    const traceLogPath = join(dir, 'trace.jsonl')
+    const server = createProxyServer({ upstream: upstream.url, traceLogPath, config: { barrier: { enabled: true } } })
+    servers.push(server)
+    const port = await listen(server)
+
+    const body = JSON.stringify({
+      model: 'claude-sonnet-5',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'identical prefix content' }] }],
+    })
+
+    // First caller gets the 429.
+    await fetch(`http://127.0.0.1:${port}/v1/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body })
+    // Second caller, same prefix, same (absent) auth -> same barrier key.
+    await fetch(`http://127.0.0.1:${port}/v1/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body })
+
+    const lines = readFileSync(traceLogPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as { barrierRole?: string })
+    rmSync(dir, { recursive: true, force: true })
+
+    expect(lines).toHaveLength(2)
+    expect(lines[1]?.barrierRole).toBe('leader')
+  })
+
+  it('an entry warmed via firstByte() is unaffected by a later fail() call', async () => {
+    const barrier = new WriteBarrier()
+    const hash = 'test-hash'
+
+    await barrier.enter(hash) // leader
+    barrier.firstByte(hash) // warms the entry
+    barrier.fail(hash) // an unrelated later caller's failure
+
+    const result = await barrier.enter(hash)
+
+    expect(result.role).toBe('follower')
   })
 })
