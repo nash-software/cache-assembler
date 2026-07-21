@@ -369,16 +369,29 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
 
       const chunks: Buffer[] = []
       let firstByteSignaled = false
+      let capturedUsage: Usage | undefined
+      let usageFound = false
       for await (const chunk of upstreamRes.body as AsyncIterable<Buffer>) {
         if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && barrierKey !== undefined && isSuccessStatus) {
           barrier.firstByte(barrierKey)
           firstByteSignaled = true
         }
-        // Only accumulate the full body when something will actually read it
-        // back (usage extraction for telemetry) — otherwise every proxied
-        // response was fully buffered in memory for no reason, even with
-        // telemetry disabled.
-        if (needsUsageBuffer) chunks.push(chunk)
+        // Only accumulate the body when something will actually read it back
+        // (usage extraction for telemetry) — otherwise every proxied response
+        // was fully buffered in memory for no reason, even with telemetry
+        // disabled. Once usage has been found, stop retaining further chunks
+        // (they're still forwarded to the client below) so a long streamed
+        // response doesn't sit fully buffered after its usage event has
+        // already arrived — extractUsage()'s own try/catch makes probing a
+        // partial buffer safe (a parse failure just means "not yet").
+        if (needsUsageBuffer && !usageFound) {
+          chunks.push(chunk)
+          const probed = extractUsage(Buffer.concat(chunks).toString('utf8'))
+          if (probed !== undefined) {
+            capturedUsage = probed
+            usageFound = true
+          }
+        }
         res.write(chunk)
       }
       res.end()
@@ -397,7 +410,7 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       }
 
       if (needsUsageBuffer && prefixHash !== undefined) {
-        const usage = extractUsage(Buffer.concat(chunks).toString('utf8'))
+        const usage = capturedUsage ?? extractUsage(Buffer.concat(chunks).toString('utf8'))
         if (usage !== undefined) {
           telemetry.record({ prefixHash, usage, canonicalPrefix, chainPosition })
           if (trace !== undefined) {

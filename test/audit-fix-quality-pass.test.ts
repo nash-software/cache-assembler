@@ -239,3 +239,78 @@ describe('/stats divergence tracking populates for standalone proxy users (item 
     expect(stats.divergences.length).toBeGreaterThan(0)
   })
 })
+
+// --- Item 8: telemetry response buffering must stop once usage has been
+// found, while still forwarding every chunk to the client.
+describe('response buffering for telemetry stops once usage is found (item 8)', () => {
+  it('stops buffering once usage is found', async () => {
+    const upstream = await startFakeUpstream((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      // The usage-bearing event arrives first, well before stream end.
+      res.write(
+        'event: message_start\ndata: ' +
+          JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 50, cache_creation_input_tokens: 20 } } }) +
+          '\n\n',
+      )
+      setTimeout(() => {
+        res.write('event: content_block_delta\ndata: ' + JSON.stringify({ type: 'content_block_delta', delta: { text: 'hello ' } }) + '\n\n')
+        setTimeout(() => {
+          res.write('event: content_block_delta\ndata: ' + JSON.stringify({ type: 'content_block_delta', delta: { text: 'world' } }) + '\n\n')
+          setTimeout(() => {
+            res.write('event: message_stop\ndata: ' + JSON.stringify({ type: 'message_stop' }) + '\n\n')
+            res.end()
+          }, 5)
+        }, 5)
+      }, 5)
+    })
+
+    const server = createProxyServer({ upstream: upstream.url, config: { barrier: { enabled: false } } })
+    servers.push(server)
+    const port = await listen(server)
+
+    const res = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'x', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] }),
+    })
+    const body = await res.text()
+
+    // (a) usage is still extracted correctly, despite chunks arriving after
+    // the usage event and (per item 8) no longer being retained internally.
+    const stats = (await (await fetch(`http://127.0.0.1:${port}/stats`)).json()) as {
+      requests: number
+      cacheWrites: number
+      cacheCreationTokens: number
+    }
+    expect(stats.requests).toBe(1)
+    expect(stats.cacheWrites).toBe(1)
+    expect(stats.cacheCreationTokens).toBe(20)
+
+    // (b) post-usage chunks are still forwarded to the client, not dropped.
+    expect(body).toContain('hello ')
+    expect(body).toContain('world')
+    expect(body).toContain('message_stop')
+  })
+
+  it('still extracts usage correctly from a non-streaming single JSON blob (no regression)', async () => {
+    const upstream = await startFakeUpstream((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ usage: { input_tokens: 10, cache_read_input_tokens: 30 } }))
+    })
+
+    const server = createProxyServer({ upstream: upstream.url, config: { barrier: { enabled: false } } })
+    servers.push(server)
+    const port = await listen(server)
+
+    await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'x', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] }),
+    })
+
+    const stats = (await (await fetch(`http://127.0.0.1:${port}/stats`)).json()) as { requests: number; cacheReads: number; cacheReadTokens: number }
+    expect(stats.requests).toBe(1)
+    expect(stats.cacheReads).toBe(1)
+    expect(stats.cacheReadTokens).toBe(30)
+  })
+})
