@@ -77,6 +77,9 @@ Options:
 The standalone server exposes `GET /health` (liveness) and `GET /stats`
 (telemetry as JSON) alongside the proxied `POST /v1/messages` path (also
 accepted under any `/hop/*` path, for chaining behind another reverse proxy).
+`/stats`'s `estLostUsd` field is always `<= 0` — its magnitude is the premium
+paid for cache writes vs. what those same tokens would have cost as plain
+input.
 
 ## Presets
 
