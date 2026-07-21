@@ -204,3 +204,38 @@ describe('write barrier only warms on 2xx and fail() no-ops on warm entries (ite
     expect(result.role).toBe('follower')
   })
 })
+
+// --- Item 1: /stats.divergences must actually populate for standalone proxy
+// users once telemetry.record() receives canonicalPrefix + chainPosition
+// from server.ts.
+describe('/stats divergence tracking populates for standalone proxy users (item 1)', () => {
+  it('reports a divergence for two same-chain-position requests with different system content', async () => {
+    const upstream = await startFakeUpstream((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ usage: { input_tokens: 10 } }))
+    })
+    const server = createProxyServer({ upstream: upstream.url })
+    servers.push(server)
+    const port = await listen(server)
+
+    async function send(systemText: string): Promise<void> {
+      await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-5',
+          system: [{ type: 'text', text: systemText }],
+          messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+        }),
+      })
+    }
+
+    await send('system prompt variant A '.repeat(20))
+    await send('a totally different system prompt variant B '.repeat(20))
+
+    const stats = (await (await fetch(`http://127.0.0.1:${port}/stats`)).json()) as { divergences: unknown[] }
+
+    expect(Array.isArray(stats.divergences)).toBe(true)
+    expect(stats.divergences.length).toBeGreaterThan(0)
+  })
+})

@@ -63,6 +63,7 @@ describe('TelemetryStore (F5 basic recording)', () => {
       usage: usage({ cache_read_input_tokens: 20 }),
       report: {
         prefixHash: 'a',
+        canonicalPrefix: '{}',
         features: {
           canonicalize: { applied: true },
           breakpoints: { placed: [], existingRespected: 0 },

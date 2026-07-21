@@ -308,12 +308,21 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
     }
     let outgoingBody = rawBody
     let prefixHash: string | undefined
+    let canonicalPrefix: string | undefined
+    let chainPosition: number | undefined
 
     try {
       const originalReq = JSON.parse(rawBody) as AnthropicRequestLike
       const result = assemble(originalReq, opts.config ?? {})
       outgoingBody = JSON.stringify(result.req)
       prefixHash = result.report.prefixHash
+      canonicalPrefix = result.report.canonicalPrefix
+      // The integer message count, derived from data already in the
+      // request — never a new client header. Two unrelated conversations
+      // with the same message count share a slot (accepted per the plan's
+      // Open Questions; divergence detection still works, attribution can
+      // just be a false positive in that narrow case).
+      chainPosition = originalReq.messages.length
       if (trace !== undefined) {
         trace.prefixHash = prefixHash
         trace.assemble = {
@@ -390,7 +399,7 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       if (needsUsageBuffer && prefixHash !== undefined) {
         const usage = extractUsage(Buffer.concat(chunks).toString('utf8'))
         if (usage !== undefined) {
-          telemetry.record({ prefixHash, usage })
+          telemetry.record({ prefixHash, usage, canonicalPrefix, chainPosition })
           if (trace !== undefined) {
             trace.usage = usage
             trace.economics = computeRequestEconomics(usage, telemetry.pricing())

@@ -3,7 +3,7 @@ import { resolveConfig, type CacheAssemblerConfig } from './config.js'
 import { canonicalizeRequest } from './canonicalize.js'
 import { defer } from './deferral.js'
 import { placeBreakpoints, countExistingBreakpoints } from './breakpoints.js'
-import { prefixHash } from './prefix-hash.js'
+import { prefixHash, serializePrefixSegment } from './prefix-hash.js'
 
 type DeferralMode = AssembleReport['features']['deferral']['mode']
 
@@ -52,6 +52,7 @@ export function assemble(
 
   const report: AssembleReport = {
     prefixHash: prefixHash(withBreakpoints, uptoIndex),
+    canonicalPrefix: serializePrefixSegment(withBreakpoints, uptoIndex),
     features: {
       canonicalize: { applied: cfg.canonicalize.enabled },
       breakpoints: { placed, existingRespected },
