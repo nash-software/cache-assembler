@@ -240,6 +240,44 @@ describe('/stats divergence tracking populates for standalone proxy users (item 
   })
 })
 
+// --- Security-scan finding: activating divergence tracking (item 1) turned a
+// previously-dead code path live, and /stats is an unauthenticated network
+// endpoint — its prefix_slice field must never expose raw request content.
+describe('/stats redacts divergence content over the network (security finding)', () => {
+  it('never includes the raw system-prompt text in the network /stats response', async () => {
+    const SECRET_MARKER = 'never-leak-this-prompt-fragment-over-the-wire'
+    const upstream = await startFakeUpstream((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ usage: { input_tokens: 10 } }))
+    })
+    const server = createProxyServer({ upstream: upstream.url })
+    servers.push(server)
+    const port = await listen(server)
+
+    async function send(systemText: string): Promise<void> {
+      await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-5',
+          system: [{ type: 'text', text: systemText }],
+          messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+        }),
+      })
+    }
+
+    await send(`${SECRET_MARKER} variant A `.repeat(10))
+    await send(`${SECRET_MARKER} variant B `.repeat(10))
+
+    const rawBody = await (await fetch(`http://127.0.0.1:${port}/stats`)).text()
+
+    expect(rawBody).not.toContain(SECRET_MARKER)
+    const stats = JSON.parse(rawBody) as { divergences: Array<{ prefix_slice: string }> }
+    expect(stats.divergences.length).toBeGreaterThan(0)
+    expect(stats.divergences[0]?.prefix_slice).toMatch(/^\[redacted, \d+ chars\]$/)
+  })
+})
+
 // --- Item 8: telemetry response buffering must stop once usage has been
 // found, while still forwarding every chunk to the client.
 describe('response buffering for telemetry stops once usage is found (item 8)', () => {

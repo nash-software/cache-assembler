@@ -14,7 +14,7 @@ import type { AnthropicRequestLike, AssembleReport, Usage } from './types.js'
 import { resolveConfig, type CacheAssemblerConfig } from './config.js'
 import { assemble } from './assemble.js'
 import { WriteBarrier, type WriteBarrierRole } from './barrier.js'
-import { TelemetryStore, computeRequestEconomics, type RequestEconomics } from './telemetry.js'
+import { TelemetryStore, computeRequestEconomics, type RequestEconomics, type TelemetryStats } from './telemetry.js'
 
 export interface ProxyServerOptions {
   upstream: string
@@ -141,6 +141,22 @@ function safeHeaders(headers: IncomingHttpHeaders): Record<string, string> {
       : '[not logged]'
   }
   return out
+}
+
+/**
+ * `/stats` is an unauthenticated network endpoint (see the `--host` help text
+ * above) — the `divergences` array's `prefix_slice` field is a raw excerpt of
+ * actual request content (system/message text), not an aggregate counter like
+ * every other `/stats` field. Exposing it verbatim over the network would let
+ * anyone who can reach the port read fragments of other callers' prompts.
+ * Library callers using `TelemetryStore.stats()` directly still get the full,
+ * unredacted record — this redaction is specific to the network response.
+ */
+function redactDivergencesForNetworkExposure(stats: TelemetryStats): TelemetryStats {
+  return {
+    ...stats,
+    divergences: stats.divergences.map((d) => ({ ...d, prefix_slice: `[redacted, ${d.prefix_slice.length} chars]` })),
+  }
 }
 
 /**
@@ -439,7 +455,7 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       return
     }
     if (req.method === 'GET' && url.pathname === STATS_PATH) {
-      sendJson(res, 200, telemetry.stats())
+      sendJson(res, 200, redactDivergencesForNetworkExposure(telemetry.stats()))
       return
     }
     if (req.method === 'POST' && isProxiedPath(url.pathname)) {
