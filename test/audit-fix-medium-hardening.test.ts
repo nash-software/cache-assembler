@@ -32,8 +32,12 @@ async function startFakeUpstream(handler: (req: IncomingMessage, res: ServerResp
 }
 
 // --- Finding 4: trace-log redaction misses proxy-authorization ---
+// Note: since the item-2 allowlist fix (fix-remaining-prelaunch-findings plan,
+// step 2), non-allowlisted headers are marked '[not logged]' rather than
+// '[redacted]' — the marker text changed, but the guarantee this test proves
+// (a credential header's raw value never reaches the trace log) still holds.
 describe('trace-log redaction regression (audit finding MEDIUM-4)', () => {
-  it('redacts proxy-authorization the same way it redacts authorization', async () => {
+  it('never logs proxy-authorization verbatim, same as authorization', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cache-assembler-audit-'))
     const traceLogPath = join(dir, 'trace.jsonl')
     const upstream = await startFakeUpstream((_req, res) => {
@@ -55,7 +59,7 @@ describe('trace-log redaction regression (audit finding MEDIUM-4)', () => {
 
     const line = readFileSync(traceLogPath, 'utf8').trim().split('\n')[0]!
     const entry = JSON.parse(line) as { headers: Record<string, string> }
-    expect(entry.headers['proxy-authorization']).toBe('[redacted]')
+    expect(entry.headers['proxy-authorization']).toBe('[not logged]')
 
     rmSync(dir, { recursive: true, force: true })
   })

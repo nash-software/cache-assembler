@@ -156,8 +156,8 @@ describe('createProxyServer request tracing', () => {
     expect(typeof entry.requestId).toBe('string')
     expect(typeof entry.latencyMs).toBe('number')
     expect(entry.upstreamStatus).toBe(200)
-    expect(entry.headers.authorization).toBe('[redacted]')
-    expect(entry.headers['x-api-key']).toBe('[redacted]')
+    expect(entry.headers.authorization).toBe('[not logged]')
+    expect(entry.headers['x-api-key']).toBe('[not logged]')
     expect(entry.headers['user-agent']).toBe('claude-cli/1.0')
     expect(entry.usage.cache_creation_input_tokens).toBe(100)
     expect(entry.economics.netSavedUsd).toBeCloseTo(-0.0003, 6) // 100 tokens * ($3 base - $6 write) / 1e6

@@ -119,19 +119,26 @@ interface UpstreamResponse {
   body: IncomingMessage
 }
 
-const REDACTED_HEADER_KEYS = new Set(['authorization', 'proxy-authorization', 'x-api-key', 'cookie', 'set-cookie'])
+const ALLOWED_TRACE_HEADER_KEYS = new Set(['content-type', 'anthropic-version', 'anthropic-beta', 'user-agent', 'accept'])
 
 /**
- * Redacts known-sensitive headers by key but otherwise keeps everything —
- * we don't know in advance which header (if any) a client uses to
- * distinguish concurrent sessions/agents, so the trace log captures the
- * full set rather than a pre-decided allowlist.
+ * Allowlist-based, not blocklist-based: a blocklist can only redact headers
+ * whose sensitivity was anticipated in advance, so any credential-shaped
+ * header a client happens to use (e.g. a custom API key header) would leak
+ * verbatim into the trace log. Only headers known to be safe to log are
+ * emitted as-is; every other header — including ones this project has never
+ * seen — is replaced with a fixed marker rather than its raw value.
  */
 function safeHeaders(headers: IncomingHttpHeaders): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(headers)) {
     if (value === undefined) continue
-    out[key] = REDACTED_HEADER_KEYS.has(key.toLowerCase()) ? '[redacted]' : Array.isArray(value) ? value.join(', ') : value
+    const lowerKey = key.toLowerCase()
+    out[key] = ALLOWED_TRACE_HEADER_KEYS.has(lowerKey)
+      ? Array.isArray(value)
+        ? value.join(', ')
+        : value
+      : '[not logged]'
   }
   return out
 }
