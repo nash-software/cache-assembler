@@ -1,4 +1,4 @@
-import type { AnthropicRequestLike, AssemblerState, AssembleReport } from './types.js'
+import type { AnthropicRequestLike, AssembleReport } from './types.js'
 import { resolveConfig, type CacheAssemblerConfig } from './config.js'
 import { canonicalizeRequest } from './canonicalize.js'
 import { defer } from './deferral.js'
@@ -22,7 +22,6 @@ function resolveDeferralMode(enabled: boolean, dryRun: boolean): DeferralMode {
 export function assemble(
   req: AnthropicRequestLike,
   partialCfg: CacheAssemblerConfig,
-  _state: AssemblerState,
 ): { req: AnthropicRequestLike; report: AssembleReport } {
   const cfg = resolveConfig(partialCfg)
   const existingRespected = countExistingBreakpoints(req)

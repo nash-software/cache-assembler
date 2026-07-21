@@ -19,7 +19,7 @@ describe('assemble() input-mutation regression (audit finding HIGH-1)', () => {
     const systemRef = req.system
     const systemSnapshotBefore = JSON.parse(JSON.stringify(req.system))
 
-    assemble(req, {}, { knownPrefixHashes: [] })
+    assemble(req, {})
 
     expect(req.system).toBe(systemRef)
     expect(req.system).toEqual(systemSnapshotBefore)
@@ -37,7 +37,7 @@ describe('assemble() input-mutation regression (audit finding HIGH-1)', () => {
     }
     const messagesSnapshotBefore = JSON.parse(JSON.stringify(req.messages))
 
-    assemble(req, {}, { knownPrefixHashes: [] })
+    assemble(req, {})
 
     expect(req.messages).toEqual(messagesSnapshotBefore)
   })

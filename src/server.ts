@@ -10,7 +10,7 @@ import {
 import { request as httpsRequest } from 'node:https'
 import { appendFileSync } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
-import type { AnthropicRequestLike, AssembleReport, AssemblerState, Usage } from './types.js'
+import type { AnthropicRequestLike, AssembleReport, Usage } from './types.js'
 import { resolveConfig, type CacheAssemblerConfig } from './config.js'
 import { assemble } from './assemble.js'
 import { WriteBarrier, type WriteBarrierRole } from './barrier.js'
@@ -21,7 +21,6 @@ export interface ProxyServerOptions {
   config?: CacheAssemblerConfig
   barrier?: WriteBarrier
   telemetry?: TelemetryStore
-  state?: AssemblerState
   /** Max request body size in bytes before a 413 is returned. Default 10MB. */
   maxBodyBytes?: number
   /**
@@ -233,7 +232,6 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
   const cfg = resolveConfig(opts.config ?? {})
   const barrier = opts.barrier ?? new WriteBarrier({ holdTimeoutMs: cfg.barrier.holdTimeoutMs })
   const telemetry = opts.telemetry ?? new TelemetryStore()
-  const state: AssemblerState = opts.state ?? { knownPrefixHashes: [] }
   const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES
 
   async function handleProxiedRequest(req: IncomingMessage, res: ServerResponse, pathname: string, forwardPath: string): Promise<void> {
@@ -300,7 +298,7 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
 
     try {
       const originalReq = JSON.parse(rawBody) as AnthropicRequestLike
-      const result = assemble(originalReq, opts.config ?? {}, state)
+      const result = assemble(originalReq, opts.config ?? {})
       outgoingBody = JSON.stringify(result.req)
       prefixHash = result.report.prefixHash
       if (trace !== undefined) {

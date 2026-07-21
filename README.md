@@ -48,7 +48,7 @@ requests:
 ```ts
 import { assemble } from 'cache-assembler'
 
-const { req, report } = assemble(anthropicRequest, config, state)
+const { req, report } = assemble(anthropicRequest, config)
 // req: the rewritten request, ready to send to the Anthropic API
 // report: what each feature did (breakpoints placed, spans moved, prefix hash)
 ```

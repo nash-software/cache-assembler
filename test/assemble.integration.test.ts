@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { assemble } from '../src/assemble.js'
-import type { AnthropicRequestLike, AssemblerState } from '../src/types.js'
+import type { AnthropicRequestLike } from '../src/types.js'
 import type { CacheAssemblerConfig } from '../src/config.js'
-
-const EMPTY_STATE: AssemblerState = { knownPrefixHashes: [] }
 
 const SESSION_EXTRACTOR = {
   id: 'session-id',
@@ -28,8 +26,8 @@ describe('assemble (orchestrator)', () => {
   it('produces identical prefix hashes for two sessions differing only in session UUID when deferral is active', () => {
     const cfg: CacheAssemblerConfig = { deferral: { enabled: true, dryRun: false, extractors: [SESSION_EXTRACTOR] } }
 
-    const a = assemble(makeSession('abc-123'), cfg, EMPTY_STATE)
-    const b = assemble(makeSession('xyz-789'), cfg, EMPTY_STATE)
+    const a = assemble(makeSession('abc-123'), cfg)
+    const b = assemble(makeSession('xyz-789'), cfg)
 
     expect(a.report.prefixHash).toBe(b.report.prefixHash)
   })
@@ -37,15 +35,15 @@ describe('assemble (orchestrator)', () => {
   it('produces different prefix hashes for the same two sessions when deferral is disabled (control)', () => {
     const cfg: CacheAssemblerConfig = { deferral: { enabled: false } }
 
-    const a = assemble(makeSession('abc-123'), cfg, EMPTY_STATE)
-    const b = assemble(makeSession('xyz-789'), cfg, EMPTY_STATE)
+    const a = assemble(makeSession('abc-123'), cfg)
+    const b = assemble(makeSession('xyz-789'), cfg)
 
     expect(a.report.prefixHash).not.toBe(b.report.prefixHash)
   })
 
   it('populates every AssembleReport field per enabled feature', () => {
     const cfg: CacheAssemblerConfig = { deferral: { enabled: true, dryRun: false, extractors: [SESSION_EXTRACTOR] } }
-    const { report } = assemble(makeSession('abc-123'), cfg, EMPTY_STATE)
+    const { report } = assemble(makeSession('abc-123'), cfg)
 
     expect(report.features.canonicalize.applied).toBe(true)
     expect(report.features.breakpoints.placed.length).toBeGreaterThan(0)
@@ -62,7 +60,7 @@ describe('assemble (orchestrator)', () => {
       breakpoints: { enabled: false },
       deferral: { enabled: false },
     }
-    const { report } = assemble(makeSession('abc-123'), cfg, EMPTY_STATE)
+    const { report } = assemble(makeSession('abc-123'), cfg)
 
     expect(report.features.canonicalize.applied).toBe(false)
     expect(report.features.breakpoints.placed).toEqual([])
@@ -72,13 +70,13 @@ describe('assemble (orchestrator)', () => {
   it('never mutates the input request', () => {
     const req = makeSession('abc-123')
     const snapshot = JSON.parse(JSON.stringify(req)) as AnthropicRequestLike
-    assemble(req, { deferral: { enabled: true, dryRun: false, extractors: [SESSION_EXTRACTOR] } }, EMPTY_STATE)
+    assemble(req, { deferral: { enabled: true, dryRun: false, extractors: [SESSION_EXTRACTOR] } })
     expect(req).toEqual(snapshot)
   })
 
   it('F3 dry-run guardrail: reports mode "dry-run", leaves the request unchanged, and computes the would-be post-relocation hash', () => {
     const cfg: CacheAssemblerConfig = { deferral: { enabled: true, dryRun: true, extractors: [SESSION_EXTRACTOR] } }
-    const { req: out, report } = assemble(makeSession('abc-123'), cfg, EMPTY_STATE)
+    const { req: out, report } = assemble(makeSession('abc-123'), cfg)
 
     expect(report.features.deferral.mode).toBe('dry-run')
     expect(report.features.deferral.moved.length).toBeGreaterThan(0)
@@ -99,8 +97,8 @@ describe('assemble (orchestrator)', () => {
       messages: [{ role: 'user', content: [{ type: 'text', text: message }] }],
     })
 
-    const a = assemble(base('first unique message'), cfg, EMPTY_STATE)
-    const b = assemble(base('completely different message'), cfg, EMPTY_STATE)
+    const a = assemble(base('first unique message'), cfg)
+    const b = assemble(base('completely different message'), cfg)
 
     expect(a.report.features.breakpoints.placed.every((p) => p.location !== 'message')).toBe(true)
     expect(a.report.prefixHash).toBe(b.report.prefixHash)

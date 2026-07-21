@@ -73,10 +73,6 @@ export interface AssembleReport {
   }
 }
 
-export interface AssemblerState {
-  knownPrefixHashes: readonly string[]
-}
-
 export interface Extractor {
   id: string
   path: string
