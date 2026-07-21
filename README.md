@@ -48,7 +48,7 @@ requests:
 ```ts
 import { assemble } from 'cache-assembler'
 
-const { req, report } = assemble(anthropicRequest, config, state)
+const { req, report } = assemble(anthropicRequest, config)
 // req: the rewritten request, ready to send to the Anthropic API
 // report: what each feature did (breakpoints placed, spans moved, prefix hash)
 ```
@@ -77,6 +77,9 @@ Options:
 The standalone server exposes `GET /health` (liveness) and `GET /stats`
 (telemetry as JSON) alongside the proxied `POST /v1/messages` path (also
 accepted under any `/hop/*` path, for chaining behind another reverse proxy).
+`/stats`'s `estLostUsd` field is always `<= 0` — its magnitude is the premium
+paid for cache writes vs. what those same tokens would have cost as plain
+input.
 
 ## Presets
 

@@ -10,18 +10,17 @@ import {
 import { request as httpsRequest } from 'node:https'
 import { appendFileSync } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
-import type { AnthropicRequestLike, AssembleReport, AssemblerState, Usage } from './types.js'
+import type { AnthropicRequestLike, AssembleReport, Usage } from './types.js'
 import { resolveConfig, type CacheAssemblerConfig } from './config.js'
 import { assemble } from './assemble.js'
 import { WriteBarrier, type WriteBarrierRole } from './barrier.js'
-import { TelemetryStore, computeRequestEconomics, type RequestEconomics } from './telemetry.js'
+import { TelemetryStore, computeRequestEconomics, type RequestEconomics, type TelemetryStats } from './telemetry.js'
 
 export interface ProxyServerOptions {
   upstream: string
   config?: CacheAssemblerConfig
   barrier?: WriteBarrier
   telemetry?: TelemetryStore
-  state?: AssemblerState
   /** Max request body size in bytes before a 413 is returned. Default 10MB. */
   maxBodyBytes?: number
   /**
@@ -120,21 +119,44 @@ interface UpstreamResponse {
   body: IncomingMessage
 }
 
-const REDACTED_HEADER_KEYS = new Set(['authorization', 'proxy-authorization', 'x-api-key', 'cookie', 'set-cookie'])
+const ALLOWED_TRACE_HEADER_KEYS = new Set(['content-type', 'anthropic-version', 'anthropic-beta', 'user-agent', 'accept'])
 
 /**
- * Redacts known-sensitive headers by key but otherwise keeps everything —
- * we don't know in advance which header (if any) a client uses to
- * distinguish concurrent sessions/agents, so the trace log captures the
- * full set rather than a pre-decided allowlist.
+ * Allowlist-based, not blocklist-based: a blocklist can only redact headers
+ * whose sensitivity was anticipated in advance, so any credential-shaped
+ * header a client happens to use (e.g. a custom API key header) would leak
+ * verbatim into the trace log. Only headers known to be safe to log are
+ * emitted as-is; every other header — including ones this project has never
+ * seen — is replaced with a fixed marker rather than its raw value.
  */
 function safeHeaders(headers: IncomingHttpHeaders): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(headers)) {
     if (value === undefined) continue
-    out[key] = REDACTED_HEADER_KEYS.has(key.toLowerCase()) ? '[redacted]' : Array.isArray(value) ? value.join(', ') : value
+    const lowerKey = key.toLowerCase()
+    out[key] = ALLOWED_TRACE_HEADER_KEYS.has(lowerKey)
+      ? Array.isArray(value)
+        ? value.join(', ')
+        : value
+      : '[not logged]'
   }
   return out
+}
+
+/**
+ * `/stats` is an unauthenticated network endpoint (see the `--host` help text
+ * above) — the `divergences` array's `prefix_slice` field is a raw excerpt of
+ * actual request content (system/message text), not an aggregate counter like
+ * every other `/stats` field. Exposing it verbatim over the network would let
+ * anyone who can reach the port read fragments of other callers' prompts.
+ * Library callers using `TelemetryStore.stats()` directly still get the full,
+ * unredacted record — this redaction is specific to the network response.
+ */
+function redactDivergencesForNetworkExposure(stats: TelemetryStats): TelemetryStats {
+  return {
+    ...stats,
+    divergences: stats.divergences.map((d) => ({ ...d, prefix_slice: `[redacted, ${d.prefix_slice.length} chars]` })),
+  }
 }
 
 /**
@@ -200,12 +222,18 @@ function buildForwardHeaders(original: IncomingHttpHeaders, payloadLength: numbe
 
 function forwardToUpstream(
   upstream: string,
-  pathname: string,
+  forwardPath: string,
   originalHeaders: IncomingHttpHeaders,
   body: string,
   signal: AbortSignal,
 ): Promise<UpstreamResponse> {
-  const target = new URL(pathname, upstream)
+  // `new URL(forwardPath, upstream)` would treat `upstream` as an origin and
+  // silently drop any path segment already configured on it (e.g. a gateway
+  // mounted at /base). Join the configured path with the proxied path instead
+  // of replacing it; forwardPath already carries the query string.
+  const base = new URL(upstream)
+  const basePath = base.pathname === '/' ? '' : base.pathname.replace(/\/+$/, '')
+  const target = new URL(basePath + forwardPath, base.origin)
   const requestFn = target.protocol === 'https:' ? httpsRequest : httpRequest
   const payload = Buffer.from(body, 'utf8')
 
@@ -233,7 +261,6 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
   const cfg = resolveConfig(opts.config ?? {})
   const barrier = opts.barrier ?? new WriteBarrier({ holdTimeoutMs: cfg.barrier.holdTimeoutMs })
   const telemetry = opts.telemetry ?? new TelemetryStore()
-  const state: AssemblerState = opts.state ?? { knownPrefixHashes: [] }
   const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES
 
   async function handleProxiedRequest(req: IncomingMessage, res: ServerResponse, pathname: string, forwardPath: string): Promise<void> {
@@ -297,12 +324,21 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
     }
     let outgoingBody = rawBody
     let prefixHash: string | undefined
+    let canonicalPrefix: string | undefined
+    let chainPosition: number | undefined
 
     try {
       const originalReq = JSON.parse(rawBody) as AnthropicRequestLike
-      const result = assemble(originalReq, opts.config ?? {}, state)
+      const result = assemble(originalReq, opts.config ?? {})
       outgoingBody = JSON.stringify(result.req)
       prefixHash = result.report.prefixHash
+      canonicalPrefix = result.report.canonicalPrefix
+      // The integer message count, derived from data already in the
+      // request — never a new client header. Two unrelated conversations
+      // with the same message count share a slot (accepted per the plan's
+      // Open Questions; divergence detection still works, attribution can
+      // just be a false positive in that narrow case).
+      chainPosition = originalReq.messages.length
       if (trace !== undefined) {
         trace.prefixHash = prefixHash
         trace.assemble = {
@@ -339,31 +375,60 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       clearTimeout(headersTimeout)
       res.writeHead(upstreamRes.statusCode, upstreamRes.headers)
       if (trace !== undefined) trace.upstreamStatus = upstreamRes.statusCode
+      // A non-2xx upstream response (e.g. 429) is a normal HTTP response, not
+      // a thrown error, so the catch block below never sees it. Only a 2xx
+      // means the cache write the leader triggered actually happened —
+      // warming the barrier for anything else would tell the next
+      // identical-prefix caller to wait as a follower on a write that never
+      // landed.
+      const isSuccessStatus = upstreamRes.statusCode >= 200 && upstreamRes.statusCode < 300
 
       const chunks: Buffer[] = []
       let firstByteSignaled = false
+      let capturedUsage: Usage | undefined
+      let usageFound = false
       for await (const chunk of upstreamRes.body as AsyncIterable<Buffer>) {
-        if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && barrierKey !== undefined) {
+        if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && barrierKey !== undefined && isSuccessStatus) {
           barrier.firstByte(barrierKey)
           firstByteSignaled = true
         }
-        // Only accumulate the full body when something will actually read it
-        // back (usage extraction for telemetry) — otherwise every proxied
-        // response was fully buffered in memory for no reason, even with
-        // telemetry disabled.
-        if (needsUsageBuffer) chunks.push(chunk)
+        // Only accumulate the body when something will actually read it back
+        // (usage extraction for telemetry) — otherwise every proxied response
+        // was fully buffered in memory for no reason, even with telemetry
+        // disabled. Once usage has been found, stop retaining further chunks
+        // (they're still forwarded to the client below) so a long streamed
+        // response doesn't sit fully buffered after its usage event has
+        // already arrived — extractUsage()'s own try/catch makes probing a
+        // partial buffer safe (a parse failure just means "not yet").
+        if (needsUsageBuffer && !usageFound) {
+          chunks.push(chunk)
+          const probed = extractUsage(Buffer.concat(chunks).toString('utf8'))
+          if (probed !== undefined) {
+            capturedUsage = probed
+            usageFound = true
+          }
+        }
         res.write(chunk)
       }
       res.end()
 
       if (!firstByteSignaled && role === 'leader' && cfg.barrier.enabled && barrierKey !== undefined) {
-        barrier.firstByte(barrierKey)
+        if (isSuccessStatus) {
+          barrier.firstByte(barrierKey)
+        } else {
+          // Leader's response was non-2xx: clear the pending entry so the
+          // next identical-prefix caller enters fresh as a leader instead of
+          // waiting as a follower on a write that never happened. Safe even
+          // if this hash was already warmed by a prior successful request —
+          // fail() no-ops on a warm entry (item 5).
+          barrier.fail(barrierKey)
+        }
       }
 
       if (needsUsageBuffer && prefixHash !== undefined) {
-        const usage = extractUsage(Buffer.concat(chunks).toString('utf8'))
+        const usage = capturedUsage ?? extractUsage(Buffer.concat(chunks).toString('utf8'))
         if (usage !== undefined) {
-          telemetry.record({ prefixHash, usage })
+          telemetry.record({ prefixHash, usage, canonicalPrefix, chainPosition })
           if (trace !== undefined) {
             trace.usage = usage
             trace.economics = computeRequestEconomics(usage, telemetry.pricing())
@@ -390,7 +455,7 @@ export function createProxyServer(opts: ProxyServerOptions): Server {
       return
     }
     if (req.method === 'GET' && url.pathname === STATS_PATH) {
-      sendJson(res, 200, telemetry.stats())
+      sendJson(res, 200, redactDivergencesForNetworkExposure(telemetry.stats()))
       return
     }
     if (req.method === 'POST' && isProxiedPath(url.pathname)) {

@@ -52,7 +52,7 @@ describe('defer (F3 volatile-byte deferral)', () => {
     expect(prefixHashAfter).toBe(prefixHashBefore)
   })
 
-  it('active mode appends a trailing system-reminder block containing every moved span verbatim', () => {
+  it('active mode appends a trailing relocated-context block containing every moved span verbatim', () => {
     const req = baseRequest('abc-123')
     const cfg = resolveConfig({ deferral: { enabled: true, dryRun: false, extractors: [SESSION_EXTRACTOR] } })
     const { req: out, moved } = defer(req, cfg)
@@ -60,8 +60,8 @@ describe('defer (F3 volatile-byte deferral)', () => {
     const lastMessage = out.messages.at(-1)!
     const blocks = lastMessage.content as { type: string; text: string }[]
     const relocatedBlock = blocks.at(-1)!
-    expect(relocatedBlock.text).toContain('<system-reminder>')
-    expect(relocatedBlock.text).toContain('</system-reminder>')
+    expect(relocatedBlock.text).toContain('<relocated-context>')
+    expect(relocatedBlock.text).toContain('</relocated-context>')
     for (const span of moved) {
       expect(relocatedBlock.text).toContain(span.text)
     }

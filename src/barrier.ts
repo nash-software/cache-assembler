@@ -96,11 +96,15 @@ export class WriteBarrier {
    * Fail-open path for leader-side upstream errors: releases every pending
    * follower and clears the hash's state entirely so the next enter() for
    * that hash starts a fresh leader/follower cycle rather than staying warm
-   * against a cache entry that was never actually written.
+   * against a cache entry that was never actually written. Never evicts an
+   * already-warm entry: firstByte() already confirmed the write landed, so a
+   * later fail() call (e.g. a non-2xx response arriving after a prior 2xx
+   * warmed the same hash) must not discard a real cache entry.
    */
   fail(hash: string): void {
     const entry = this.entries.get(hash)
     if (entry === undefined) return
+    if (entry.warm) return
     this.clearTimeout(entry)
     this.releaseFollowers(entry)
     this.entries.delete(hash)

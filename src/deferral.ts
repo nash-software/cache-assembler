@@ -67,7 +67,7 @@ function extractSpans(req: AnthropicRequestLike, extractors: Extractor[]): { req
 
 function buildRelocationBlock(moved: MovedSpan[]): ContentBlock {
   const lines = moved.map((span) => `[${span.id}] ${span.text}`)
-  const text = `<system-reminder>relocated volatile context:\n${lines.join('\n')}\n</system-reminder>`
+  const text = `<relocated-context>relocated volatile context:\n${lines.join('\n')}\n</relocated-context>`
   return { type: RELOCATION_BLOCK_TYPE, text }
 }
 
@@ -95,7 +95,7 @@ function hashRelocated(req: AnthropicRequestLike, moved: MovedSpan[]): string {
  * F3 volatile-byte deferral: for each configured extractor, finds its
  * matching span (via the JSON path grammar), removes it from its source
  * location, and — unless dryRun is set — appends a single trailing
- * `<system-reminder>` block to the final message listing every moved span
+ * `<relocated-context>` block to the final message listing every moved span
  * verbatim. RELOCATE never DELETE: dry-run mode leaves the request
  * byte-identical and only reports what would move; prefixHashAfter still
  * reflects the hypothetical post-relocation hash (the guardrail's whole

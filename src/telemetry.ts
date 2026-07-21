@@ -32,6 +32,8 @@ export interface TelemetryStats {
   cacheReadTokens: number
   cacheCreationTokens: number
   estSavedUsd: number
+  /** Always <= 0; magnitude is the premium paid for cache writes vs. what
+   * those same tokens would have cost as plain input. */
   estLostUsd: number
   divergences: DivergenceRecord[]
 }

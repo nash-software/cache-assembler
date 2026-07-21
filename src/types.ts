@@ -61,6 +61,8 @@ export interface MovedSpan {
 
 export interface AssembleReport {
   prefixHash: string
+  /** The exact canonical JSON string prefixHash's digest was computed over. */
+  canonicalPrefix: string
   features: {
     canonicalize: { applied: boolean }
     breakpoints: { placed: BreakpointPlacement[]; existingRespected: number }
@@ -71,10 +73,6 @@ export interface AssembleReport {
       prefixHashAfter: string
     }
   }
-}
-
-export interface AssemblerState {
-  knownPrefixHashes: readonly string[]
 }
 
 export interface Extractor {
