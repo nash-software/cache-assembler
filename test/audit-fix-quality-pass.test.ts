@@ -80,3 +80,70 @@ describe('trace-log header capture is allowlist-based (item 2)', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+// --- Item 3: forwardToUpstream must preserve a path segment already present
+// in the configured --upstream URL (e.g. a gateway mounted at /base).
+describe('forwardToUpstream preserves a configured upstream path segment (item 3)', () => {
+  it('joins the configured upstream path with the proxied path instead of replacing it', async () => {
+    let receivedPath: string | undefined
+    const upstream = await startFakeUpstream((req, res) => {
+      receivedPath = req.url
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ usage: { input_tokens: 10 } }))
+    })
+
+    const server = createProxyServer({ upstream: `${upstream.url}/base`, config: { barrier: { enabled: false } } })
+    servers.push(server)
+    const port = await listen(server)
+
+    await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'x', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] }),
+    })
+
+    expect(receivedPath).toBe('/base/v1/messages')
+  })
+
+  it('still targets /v1/messages unchanged when --upstream has no path segment (no regression)', async () => {
+    let receivedPath: string | undefined
+    const upstream = await startFakeUpstream((req, res) => {
+      receivedPath = req.url
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ usage: { input_tokens: 10 } }))
+    })
+
+    const server = createProxyServer({ upstream: upstream.url, config: { barrier: { enabled: false } } })
+    servers.push(server)
+    const port = await listen(server)
+
+    await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'x', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] }),
+    })
+
+    expect(receivedPath).toBe('/v1/messages')
+  })
+
+  it('preserves the query string carried in the proxied path alongside the configured path segment', async () => {
+    let receivedPath: string | undefined
+    const upstream = await startFakeUpstream((req, res) => {
+      receivedPath = req.url
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ usage: { input_tokens: 10 } }))
+    })
+
+    const server = createProxyServer({ upstream: `${upstream.url}/base`, config: { barrier: { enabled: false } } })
+    servers.push(server)
+    const port = await listen(server)
+
+    await fetch(`http://127.0.0.1:${port}/v1/messages?beta=true`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'x', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] }),
+    })
+
+    expect(receivedPath).toBe('/base/v1/messages?beta=true')
+  })
+})

@@ -206,12 +206,18 @@ function buildForwardHeaders(original: IncomingHttpHeaders, payloadLength: numbe
 
 function forwardToUpstream(
   upstream: string,
-  pathname: string,
+  forwardPath: string,
   originalHeaders: IncomingHttpHeaders,
   body: string,
   signal: AbortSignal,
 ): Promise<UpstreamResponse> {
-  const target = new URL(pathname, upstream)
+  // `new URL(forwardPath, upstream)` would treat `upstream` as an origin and
+  // silently drop any path segment already configured on it (e.g. a gateway
+  // mounted at /base). Join the configured path with the proxied path instead
+  // of replacing it; forwardPath already carries the query string.
+  const base = new URL(upstream)
+  const basePath = base.pathname === '/' ? '' : base.pathname.replace(/\/+$/, '')
+  const target = new URL(basePath + forwardPath, base.origin)
   const requestFn = target.protocol === 'https:' ? httpsRequest : httpRequest
   const payload = Buffer.from(body, 'utf8')
 
