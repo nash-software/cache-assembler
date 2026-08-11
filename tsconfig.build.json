@@ -18,6 +18,8 @@
     "rootDir": "src",
     "outDir": "dist",
     "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
     "types": ["node"]
   },
   "include": ["src/**/*.ts"]
