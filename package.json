@@ -1,6 +1,6 @@
 {
   "name": "cache-assembler",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "description": "Rewrites Anthropic Messages API requests for maximal prompt-cache reuse",
   "license": "MIT",
