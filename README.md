@@ -1,5 +1,10 @@
 # cache-assembler
 
+[![npm version](https://img.shields.io/npm/v/cache-assembler)](https://www.npmjs.com/package/cache-assembler)
+[![npm downloads](https://img.shields.io/npm/dm/cache-assembler)](https://www.npmjs.com/package/cache-assembler)
+[![CI](https://github.com/nash-software/cache-assembler/actions/workflows/ci.yml/badge.svg)](https://github.com/nash-software/cache-assembler/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/npm/l/cache-assembler)](./LICENSE)
+
 Rewrites Anthropic Messages API requests for maximal prompt-cache reuse - a
 small, dependency-free library and standalone proxy that makes your
 requests' cacheable **prefix** stay byte-identical across turns, so
@@ -49,6 +54,12 @@ enabling it in a way that changes model-visible content is always an
 explicit opt-in.
 
 ## Two ways to use it
+
+Install it first:
+
+```sh
+npm install cache-assembler
+```
 
 **1. As a pure library** - call `assemble()` directly wherever you build
 requests:
@@ -160,7 +171,7 @@ Anthropic API key: [`docs/validation-report.md`](./docs/validation-report.md).
 ## Design notes
 
 - Zero runtime dependencies - independently releasable and installable via
-  `npm i cache-assembler`.
+  [npm](https://www.npmjs.com/package/cache-assembler).
 - The core `assemble()` function is pure: it never mutates its inputs, and
   every side effect (cache-write coordination, telemetry) lives in the
   injectable proxy wrapper, not the core pipeline.
